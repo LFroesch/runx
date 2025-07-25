@@ -94,7 +94,7 @@ func main() {
 	m.allColumns = []table.Column{
 		{Title: "Name", Width: 25},
 		{Title: "Category", Width: 20},
-		{Title: "Command", Width: 30},
+		{Title: "Command", Width: 40},
 		{Title: "Work Dir", Width: 25},
 		{Title: "Description", Width: 30},
 		{Title: "Last Run", Width: 20},
@@ -465,12 +465,15 @@ func (m *model) startEdit() {
 	case 1:
 		initialValue = script.Category
 	case 2:
-		initialValue = script.Command
+		// Combine command and args for editing
+		if len(script.Args) > 0 {
+			initialValue = script.Command + " " + strings.Join(script.Args, " ")
+		} else {
+			initialValue = script.Command
+		}
 	case 3:
-		initialValue = strings.Join(script.Args, " ")
-	case 4:
 		initialValue = script.WorkDir
-	case 5:
+	case 4:
 		initialValue = script.Description
 	}
 	m.textInput.SetValue(initialValue)
@@ -490,12 +493,28 @@ func (m *model) saveEdit() {
 	case 1:
 		m.scripts[m.editRow].Category = value
 	case 2:
-		m.scripts[m.editRow].Command = value
+		// Smart parsing for shell commands
+		value = strings.TrimSpace(value)
+		
+		// Handle bash -c "script" specially
+		if strings.HasPrefix(value, "bash -c ") {
+			m.scripts[m.editRow].Command = "bash"
+			script := strings.TrimPrefix(value, "bash -c ")
+			script = strings.Trim(script, "\"'") // Remove quotes if present
+			m.scripts[m.editRow].Args = []string{"-c", script}
+		} else {
+			// For other commands, split only on first space
+			parts := strings.SplitN(value, " ", 2)
+			m.scripts[m.editRow].Command = parts[0]
+			if len(parts) > 1 {
+				m.scripts[m.editRow].Args = []string{parts[1]}
+			} else {
+				m.scripts[m.editRow].Args = []string{}
+			}
+		}
 	case 3:
-		m.scripts[m.editRow].Args = strings.Fields(value)
-	case 4:
 		m.scripts[m.editRow].WorkDir = expandPath(value)
-	case 5:
+	case 4:
 		m.scripts[m.editRow].Description = value
 	}
 
@@ -643,7 +662,7 @@ func (m model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, showStatus("✅ Script updated")
 	case "tab":
 		m.saveEdit()
-		m.editCol = (m.editCol + 1) % 6
+		m.editCol = (m.editCol + 1) % 5
 		script := m.scripts[m.editRow]
 		var newValue string
 		switch m.editCol {
@@ -652,12 +671,15 @@ func (m model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 1:
 			newValue = script.Category
 		case 2:
-			newValue = script.Command
+			// Combine command and args for editing
+			if len(script.Args) > 0 {
+				newValue = script.Command + " " + strings.Join(script.Args, " ")
+			} else {
+				newValue = script.Command
+			}
 		case 3:
-			newValue = strings.Join(script.Args, " ")
-		case 4:
 			newValue = script.WorkDir
-		case 5:
+		case 4:
 			newValue = script.Description
 		}
 		m.textInput.SetValue(newValue)
@@ -665,7 +687,7 @@ func (m model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "shift+tab":
 		m.saveEdit()
-		m.editCol = (m.editCol - 1 + 6) % 6
+		m.editCol = (m.editCol - 1 + 5) % 5
 		script := m.scripts[m.editRow]
 		var newValue string
 		switch m.editCol {
@@ -674,12 +696,15 @@ func (m model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 1:
 			newValue = script.Category
 		case 2:
-			newValue = script.Command
+			// Combine command and args for editing
+			if len(script.Args) > 0 {
+				newValue = script.Command + " " + strings.Join(script.Args, " ")
+			} else {
+				newValue = script.Command
+			}
 		case 3:
-			newValue = strings.Join(script.Args, " ")
-		case 4:
 			newValue = script.WorkDir
-		case 5:
+		case 4:
 			newValue = script.Description
 		}
 		m.textInput.SetValue(newValue)
@@ -1048,7 +1073,7 @@ func (m model) View() string {
 
 	var footer string
 	if m.editMode {
-		colNames := []string{"Name", "Category", "Command", "Args", "Work Dir", "Description"}
+		colNames := []string{"Name", "Category", "Command", "Work Dir", "Description"}
 		colName := colNames[m.editCol]
 
 		editStyle := lipgloss.NewStyle().
