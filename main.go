@@ -73,7 +73,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	configFile := filepath.Join(homeDir, ".config", "bolt", "bolt-scripts.json")
+	configFile := filepath.Join(homeDir, ".config", "scriptgodx", "scriptgodx-scripts.json")
 
 	m := model{
 		scripts:       loadScripts(configFile),
@@ -128,7 +128,7 @@ func main() {
 	t.SetStyles(s)
 
 	m.table = t
-	
+
 	// Initialize output table
 	outputTable := table.New(
 		table.WithColumns([]table.Column{{Title: "Output File", Width: 50}}),
@@ -137,7 +137,7 @@ func main() {
 	)
 	outputTable.SetStyles(s)
 	m.outputTable = outputTable
-	
+
 	m.adjustLayout()
 	m.updateTable()
 
@@ -155,14 +155,6 @@ func loadScripts(configFile string) []ScriptEntry {
 		os.MkdirAll(filepath.Dir(configFile), 0755)
 		// Return some example scripts
 		return []ScriptEntry{
-			{
-				Name:        "System Update",
-				Command:     "bash",
-				Args:        []string{"-c", "sudo apt update && sudo apt upgrade"},
-				WorkDir:     "~/",
-				Category:    "System",
-				Description: "Update system packages",
-			},
 			{
 				Name:        "Git Status All",
 				Command:     "bash",
@@ -192,31 +184,31 @@ func (m *model) saveOutputToFile(scriptName, output, workDir string, execErr err
 	if err != nil {
 		return err
 	}
-	
+
 	outputDir := filepath.Join(homeDir, ".local", "share", "scriptgodx")
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return err
 	}
-	
+
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
 	filename := fmt.Sprintf("%s_%s.txt", scriptName, timestamp)
 	// Replace spaces and special characters in filename
 	filename = strings.ReplaceAll(filename, " ", "_")
 	filename = strings.ReplaceAll(filename, "/", "_")
-	
+
 	filePath := filepath.Join(outputDir, filename)
-	
-	content := fmt.Sprintf("Script: %s\nExecuted: %s\nWorking Directory: %s\n\n", 
+
+	content := fmt.Sprintf("Script: %s\nExecuted: %s\nWorking Directory: %s\n\n",
 		scriptName, time.Now().Format("2006-01-02 15:04:05"), workDir)
-	
+
 	if execErr != nil {
 		content += fmt.Sprintf("Exit Status: Failed (%v)\n\n", execErr)
 	} else {
 		content += "Exit Status: Success\n\n"
 	}
-	
+
 	content += "Output:\n" + strings.Repeat("-", 50) + "\n" + output
-	
+
 	return os.WriteFile(filePath, []byte(content), 0644)
 }
 
@@ -225,9 +217,9 @@ func (m *model) loadOutputFiles() error {
 	if err != nil {
 		return err
 	}
-	
+
 	outputDir := filepath.Join(homeDir, ".local", "share", "scriptgodx")
-	
+
 	files, err := os.ReadDir(outputDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -236,14 +228,14 @@ func (m *model) loadOutputFiles() error {
 		}
 		return err
 	}
-	
+
 	m.outputFiles = []string{}
 	for _, file := range files {
 		if !file.IsDir() && strings.HasSuffix(file.Name(), ".txt") {
 			m.outputFiles = append(m.outputFiles, file.Name())
 		}
 	}
-	
+
 	// Sort files by modification time (newest first)
 	sort.Slice(m.outputFiles, func(i, j int) bool {
 		filePathI := filepath.Join(outputDir, m.outputFiles[i])
@@ -255,7 +247,7 @@ func (m *model) loadOutputFiles() error {
 		}
 		return infoI.ModTime().After(infoJ.ModTime())
 	})
-	
+
 	return nil
 }
 
@@ -263,7 +255,7 @@ func (m *model) updateOutputTable() {
 	columns := []table.Column{
 		{Title: "Output File", Width: m.width - 10},
 	}
-	
+
 	var rows []table.Row
 	for _, filename := range m.outputFiles {
 		// Parse filename to extract script name and timestamp
@@ -277,7 +269,7 @@ func (m *model) updateOutputTable() {
 			rows = append(rows, table.Row{filename})
 		}
 	}
-	
+
 	m.outputTable.SetColumns(columns)
 	m.outputTable.SetRows(rows)
 }
@@ -286,27 +278,27 @@ func (m *model) viewOutputFile() {
 	if len(m.outputFiles) == 0 {
 		return
 	}
-	
+
 	selectedIndex := m.outputTable.Cursor()
 	if selectedIndex >= len(m.outputFiles) {
 		return
 	}
-	
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return
 	}
-	
+
 	outputDir := filepath.Join(homeDir, ".local", "share", "scriptgodx")
 	filePath := filepath.Join(outputDir, m.outputFiles[selectedIndex])
-	
+
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		m.runOutput = fmt.Sprintf("Error reading file: %v", err)
 	} else {
 		m.runOutput = string(content)
 	}
-	
+
 	m.running = true
 	m.viewingOutput = false
 	m.outputScroll = 0
@@ -531,7 +523,7 @@ func expandPath(path string) string {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.SetWindowTitle("bolt - Script Manager")
+	return tea.SetWindowTitle("scriptgodx - Script Manager")
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -827,12 +819,12 @@ func (m model) runScript(script ScriptEntry) tea.Cmd {
 		// Run command
 		output, err := cmd.CombinedOutput()
 		outputStr := string(output)
-		
+
 		// Save output to file
 		if saveErr := m.saveOutputToFile(script.Name, outputStr, workDir, err); saveErr != nil {
 			return statusMsg{message: fmt.Sprintf("❌ Failed to save output: %v", saveErr)}
 		}
-		
+
 		if err != nil {
 			return statusMsg{message: fmt.Sprintf("❌ Script failed: %v (output saved)", err)}
 		}
@@ -954,13 +946,13 @@ func (m model) View() string {
 			Render("esc/q: close • ↑↓/j/k: scroll • pageup/pagedown: page scroll")
 
 		title := titleStyle.Render("🚀 Script Output")
-		
+
 		// Handle scrolling by splitting content into lines and showing visible portion
 		lines := strings.Split(m.runOutput, "\n")
 		visibleHeight := m.height - 8
 		startLine := m.outputScroll
 		endLine := startLine + visibleHeight
-		
+
 		if endLine > len(lines) {
 			endLine = len(lines)
 		}
@@ -970,13 +962,13 @@ func (m model) View() string {
 				startLine = 0
 			}
 		}
-		
+
 		var visibleContent string
 		if len(lines) > 0 {
 			visibleLines := lines[startLine:endLine]
 			visibleContent = strings.Join(visibleLines, "\n")
 		}
-		
+
 		content := contentStyle.Render(visibleContent)
 
 		return lipgloss.JoinVertical(lipgloss.Left, title, "", content, "", footer)
@@ -1016,7 +1008,7 @@ func (m model) View() string {
 	titleStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#F97316")).
 		Bold(true)
-	header := titleStyle.Render("⚡ bolt - Script Manager")
+	header := titleStyle.Render("⚡ scriptgodx - Script Manager")
 
 	if len(m.scripts) == 0 {
 		emptyStyle := lipgloss.NewStyle().

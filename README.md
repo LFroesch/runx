@@ -1,10 +1,10 @@
-# bolt ⚡
+# scriptgodx ⚡
 
 A lightning-fast TUI script manager for developers. Organize and instantly run your most-used scripts and commands.
 
-## What is bolt?
+## What is scriptgodx?
 
-bolt is your personal script shortcut manager. Instead of remembering complex commands or navigating to script locations, just register them once and `bolt` to run them instantly.
+scriptgodx is your personal script shortcut manager. Instead of remembering complex commands or navigating to script locations, just register them once and `scriptgodx` to run them instantly.
 
 ## Features
 
@@ -20,10 +20,10 @@ bolt is your personal script shortcut manager. Instead of remembering complex co
 
 ```bash
 # Build
-go build -o bolt main.go
+go build -o scriptgodx main.go
 
 # Install globally
-cp bolt ~/.local/bin/
+cp scriptgodx ~/.local/bin/
 
 # Make sure ~/.local/bin is in PATH
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
@@ -33,7 +33,7 @@ source ~/.bashrc
 ## Usage
 
 ```bash
-bolt
+scriptgodx
 ```
 
 ### Quick Commands
@@ -69,10 +69,10 @@ Perfect for managing:
 
 ## Storage
 
-- **Scripts**: Registered in `~/.config/bolt/bolt-scripts.json`
+- **Scripts**: Registered in `~/.config/scriptgodx/scriptgodx-scripts.json`
 - **Output History**: Automatically saved to `~/.local/share/scriptgodx/` with timestamps
 
-bolt doesn't move your scripts - it just creates shortcuts to run them from anywhere. All script output is preserved for later review.
+scriptgodx doesn't move your scripts - it just creates shortcuts to run them from anywhere. All script output is preserved for later review.
 
 ## Example Configuration
 
@@ -103,6 +103,6 @@ bolt doesn't move your scripts - it just creates shortcuts to run them from anyw
 }
 ```
 
-## Why bolt?
+## Why scriptgodx?
 
 Stop wasting time typing long commands or hunting for scripts. Register them once, run them instantly. ⚡
