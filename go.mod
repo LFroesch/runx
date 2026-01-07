@@ -1,4 +1,4 @@
-module scriptgodx
+module github.com/LFroesch/scriptgodx
 
 go 1.23.3
 

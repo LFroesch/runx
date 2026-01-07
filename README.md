@@ -19,15 +19,12 @@ scriptgodx is your personal script shortcut manager. Instead of remembering comp
 ## Installation
 
 ```bash
-# Build
-go build -o scriptgodx main.go
+go install github.com/LFroesch/scriptgodx@latest
+```
 
-# Install globally
-cp scriptgodx ~/.local/bin/
-
-# Make sure ~/.local/bin is in PATH
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
+Make sure `$GOPATH/bin` (usually `~/go/bin`) is in your PATH:
+```bash
+export PATH="$HOME/go/bin:$PATH"
 ```
 
 ## Usage
