@@ -1,4 +1,4 @@
-module github.com/LFroesch/scriptgodx
+module github.com/LFroesch/runx
 
 go 1.23.3
 

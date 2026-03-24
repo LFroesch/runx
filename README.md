@@ -1,77 +1,72 @@
-# scriptgodx ⚡
+# Runx
 
-A lightning-fast TUI script manager for developers. Organize and instantly run your most-used scripts and commands.
+TUI script runner and manager. Register commands once, organize by category, run them instantly with output capture and history. Built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
-## What is scriptgodx?
 
-scriptgodx is your personal script shortcut manager. Instead of remembering complex commands or navigating to script locations, just register them once and `scriptgodx` to run them instantly.
-
-## Features
-
-- **Lightning Fast** - Execute any registered script with one keystroke
-- **Category Organization** - Group scripts by category for easy browsing
-- **Script Tracking** - Track last run time and execution count
-- **Working Directory** - Set specific directories for script execution
-- **Output History** - All script output is automatically saved with timestamps
-- **Scrollable Output** - View long output with full scrolling support
-- **Live Editing** - Edit script details directly in the TUI
-
-## Installation
+## Install
 
 ```bash
-go install github.com/LFroesch/scriptgodx@latest
+go install github.com/LFroesch/runx@latest
 ```
 
-Make sure `$GOPATH/bin` (usually `~/go/bin`) is in your PATH:
+Or build from source:
+
 ```bash
-export PATH="$HOME/go/bin:$PATH"
+make install
 ```
 
 ## Usage
 
 ```bash
-scriptgodx
+runx
 ```
 
-### Quick Commands
+### Quick Start
 
-#### Main View
-- `↑↓` - Navigate scripts
-- `space/enter` - Run script
-- `e` - Edit script details
-- `n/a` - Add new script
-- `o` - View output history
-- `d` - Delete script
-- `r` - Refresh
-- `q` - Quit
+1. Press `n` or `a` to add a script
+2. Fill in name, command, args, working directory, category
+3. Press `enter`/`space` on any script to run it
+4. Output displays inline and is saved to history
 
-#### Output View
-- `↑↓/j/k` - Scroll line by line
-- `pageup/pagedown` - Scroll page by page
-- `esc/q` - Close output view
+## Features
 
-#### Output History
-- `↑↓` - Navigate output files
-- `space/enter` - View selected output
-- `esc/q` - Back to main view
+- **Instant execution** — Run registered scripts with one keystroke
+- **Category grouping** — Organize scripts by category (System, Docker, Git, etc.)
+- **Output capture** — All output saved with timestamps to `~/.local/share/runx/`
+- **Run tracking** — Last run time and execution count per script
+- **Working directory** — Set per-script working directories
+- **Scrollable output** — View long output with j/k and pgup/pgdn
+- **Output history** — Browse past runs and their output
 
-## Examples
+## Keybindings
 
-Perfect for managing:
-- System maintenance (`apt update`, `brew upgrade`)
-- Development tasks (`npm run dev`, `docker-compose up`)
-- Deployment scripts (`deploy.sh`, `backup.sh`)
-- Git workflows (`git pull all repos`, `clean branches`)
-- Custom automations (`resize images`, `convert videos`)
+### Main View
+| Key | Action |
+|-----|--------|
+| `j/k`, `up/down` | Navigate |
+| `enter`, `space` | Run script |
+| `n/a` | Add new script |
+| `e` | Edit script |
+| `d` | Delete script |
+| `o` | View output history |
+| `r` | Refresh |
+| `q` | Quit |
+
+### Output View
+| Key | Action |
+|-----|--------|
+| `j/k`, `up/down` | Scroll line by line |
+| `pgup/pgdn` | Scroll page |
+| `esc`, `q` | Close |
 
 ## Storage
 
-- **Scripts**: Registered in `~/.config/scriptgodx/scriptgodx-scripts.json`
-- **Output History**: Automatically saved to `~/.local/share/scriptgodx/` with timestamps
+| Location | Purpose |
+|----------|---------|
+| `~/.config/runx/runx-scripts.json` | Script registry |
+| `~/.local/share/runx/` | Output history (timestamped files) |
 
-scriptgodx doesn't move your scripts - it just creates shortcuts to run them from anywhere. All script output is preserved for later review.
-
-## Example Configuration
+## Example Config
 
 ```json
 {
@@ -83,23 +78,13 @@ scriptgodx doesn't move your scripts - it just creates shortcuts to run them fro
       "workdir": "~/",
       "category": "System",
       "description": "Update system packages",
-      "last_run": "2024-01-15 14:30",
+      "last_run": "2026-01-15 14:30",
       "run_count": 42
-    },
-    {
-      "name": "Docker Cleanup",
-      "command": "bash",
-      "args": ["-c", "docker system prune -a --volumes"],
-      "workdir": "~/",
-      "category": "Docker",
-      "description": "Clean up unused Docker resources",
-      "last_run": "2024-01-14 09:15",
-      "run_count": 18
     }
   ]
 }
 ```
 
-## Why scriptgodx?
+## License
 
-Stop wasting time typing long commands or hunting for scripts. Register them once, run them instantly. ⚡
+[AGPL-3.0](LICENSE)
