@@ -196,6 +196,7 @@ func (m model) renderFooter() string {
 		if len(m.runningScripts) > 1 {
 			add("tab", "switch")
 		}
+		add("y", "copy")
 		add("x", "close tab")
 	}
 
@@ -244,10 +245,23 @@ func (m model) renderScriptsPage() string {
 	var leftLines []string
 	visibleH := contentH - 2 // panel inner height (border eats 2)
 
-	// Clamp scroll
+	// Clamp scroll — account for indicator lines that consume visible rows.
+	// When scroll > 0, a top indicator takes 1 line. If items still overflow
+	// after the top indicator, a bottom indicator takes another line. We need
+	// maxScroll to reflect these reductions so the last item is reachable.
 	maxScroll := len(items) - visibleH
 	if maxScroll < 0 {
 		maxScroll = 0
+	}
+	if maxScroll > 0 {
+		effH := visibleH - 1 // top indicator consumes 1 line
+		if maxScroll+effH < len(items) {
+			// Bottom indicator also needed at this scroll; raise maxScroll
+			maxScroll = len(items) - effH + 1
+			if maxScroll < 0 {
+				maxScroll = 0
+			}
+		}
 	}
 	scroll := m.leftScroll
 	if scroll > maxScroll {
@@ -627,7 +641,11 @@ func (m model) renderRunningPage() string {
 	// Stdin input for running scripts
 	var stdinLine string
 	if !rs.Done && rs.stdin != nil {
-		stdinLine = "\n" + dimTextStyle.Render("  > ") + m.stdinInput.View()
+		prompt := dimTextStyle.Render("  input> ")
+		if m.stdinInput.EchoMode == 1 { // EchoPassword
+			prompt = warnTextStyle.Render("  password> ")
+		}
+		stdinLine = "\n" + prompt + m.stdinInput.View() + dimTextStyle.Render("  enter to send")
 	}
 
 	result := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", content, "", statusInfo+lineInfo)

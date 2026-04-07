@@ -1,5 +1,13 @@
 ## DevLog
 
+### 2026-04-06: Bug fixes — left panel scroll, stdin pipe, copy output, ctrl+o
+
+- **Left panel scroll**: fixed `maxScroll` in `renderScriptsPage` to account for top/bottom indicator lines consuming visible rows — cursor no longer goes off-screen at bottom of long lists
+- **stdin pipe bug**: `stdinPipe` was being discarded (`_ = stdinPipe`) in `startScript`; moved cmd setup before the goroutine so stdin is correctly passed through `scriptStartedMsg`
+- **Password UX**: auto-detects "password"/"passphrase" in output lines, masks stdinInput (`EchoPassword`) and focuses it; clears mask on tab switch or enter
+- **Copy output**: `y` in running page copies full script output to clipboard (tries clip.exe → wl-copy → xclip → xsel)
+- **ctrl+o**: now works from any edit field — auto-navigates to Work Dir field (field 4) then opens file picker
+
 ### 2026-04-06: UI fixes — height calc, q nav, E key, running page, ctrl+o
 
 - **Scripts page height**: dynamic contentH using mode + status visibility — panels now fill available space

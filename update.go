@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -42,6 +43,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if rs.Scroll >= maxScroll-1 {
 				rs.Scroll = maxScroll
+			}
+			// Detect password/passphrase prompts and mask stdin input
+			lower := strings.ToLower(msg.line)
+			if rs.stdin != nil && (strings.Contains(lower, "password") || strings.Contains(lower, "passphrase")) {
+				m.stdinInput.EchoMode = textinput.EchoPassword
+				m.stdinInput.Focus()
 			}
 			return m, listenForOutput(msg.scriptID, rs.ch)
 		}
@@ -257,11 +264,13 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "tab":
 		if len(m.runningScripts) > 1 {
 			m.activeRunTab = (m.activeRunTab + 1) % len(m.runningScripts)
+			m.stdinInput.EchoMode = textinput.EchoNormal
 		}
 		return m, nil
 	case "shift+tab":
 		if len(m.runningScripts) > 1 {
 			m.activeRunTab = (m.activeRunTab - 1 + len(m.runningScripts)) % len(m.runningScripts)
+			m.stdinInput.EchoMode = textinput.EchoNormal
 		}
 		return m, nil
 	case "x":
@@ -311,7 +320,28 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if rs.Scroll < 0 {
 			rs.Scroll = 0
 		}
+	case "y":
+		if err := copyToClipboard(rs.Output()); err != nil {
+			return m, showStatus("Copy failed: no clipboard tool found")
+		}
+		return m, showStatus(fmt.Sprintf("Copied %d lines", len(rs.Lines)))
+	case "enter":
+		if !rs.Done && rs.stdin != nil {
+			text := m.stdinInput.Value() + "\n"
+			rs.stdin.Write([]byte(text)) //nolint:errcheck
+			m.stdinInput.SetValue("")
+			m.stdinInput.EchoMode = textinput.EchoNormal
+			return m, nil
+		}
 	}
+
+	// Route unhandled keys to stdin input when script is running interactively
+	if !rs.Done && rs.stdin != nil {
+		var cmd tea.Cmd
+		m.stdinInput, cmd = m.stdinInput.Update(msg)
+		return m, cmd
+	}
+
 	return m, nil
 }
 
@@ -390,16 +420,16 @@ func (m model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loadEditField()
 		return m, nil
 	case "ctrl+f", "ctrl+o":
-		// Open file picker for Work Dir field
-		if m.editCol == 4 {
-			m.saveEdit()
-			m.mode = modeFilePicker
-			m.filePicker.Path = "" // clear any stale selection
-			if m.scripts[m.editRow].WorkDir != "" {
-				m.filePicker.CurrentDirectory = expandPath(m.scripts[m.editRow].WorkDir)
-			}
-			return m, m.filePicker.Init()
+		// Open file picker — navigate to Work Dir field first if not already there
+		m.saveEdit()
+		m.editCol = 4
+		m.loadEditField()
+		m.mode = modeFilePicker
+		m.filePicker.Path = ""
+		if m.editRow >= 0 && m.editRow < len(m.scripts) && m.scripts[m.editRow].WorkDir != "" {
+			m.filePicker.CurrentDirectory = expandPath(m.scripts[m.editRow].WorkDir)
 		}
+		return m, m.filePicker.Init()
 	}
 
 	var cmd tea.Cmd

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -244,51 +245,49 @@ func (m *model) runScript(script ScriptEntry, foreground bool) tea.Cmd {
 func startScript(script ScriptEntry, scriptID int) tea.Cmd {
 	return func() tea.Msg {
 		ch := make(chan outputLine, 100)
+		workDir := expandPath(script.WorkDir)
+
+		args := script.FullArgs()
+		var cmd *exec.Cmd
+		if len(args) > 0 {
+			cmd = exec.Command(script.Command, args...)
+		} else {
+			cmd = exec.Command(script.Command)
+		}
+		cmd.Dir = workDir
+
+		if len(script.EnvVars) > 0 {
+			cmd.Env = os.Environ()
+			for k, v := range script.EnvVars {
+				cmd.Env = append(cmd.Env, k+"="+v)
+			}
+		}
+
+		stdinPipe, stdinErr := cmd.StdinPipe()
+
+		r, w, pipeErr := os.Pipe()
+		if pipeErr != nil {
+			go func() {
+				ch <- outputLine{done: true, err: pipeErr}
+				close(ch)
+			}()
+			return scriptStartedMsg{scriptID: scriptID, ch: ch}
+		}
+		cmd.Stdout = w
+		cmd.Stderr = w
+
+		if err := cmd.Start(); err != nil {
+			w.Close()
+			r.Close()
+			go func() {
+				ch <- outputLine{done: true, err: err}
+				close(ch)
+			}()
+			return scriptStartedMsg{scriptID: scriptID, ch: ch}
+		}
 
 		go func() {
 			defer close(ch)
-			workDir := expandPath(script.WorkDir)
-
-			args := script.FullArgs()
-			var cmd *exec.Cmd
-			if len(args) > 0 {
-				cmd = exec.Command(script.Command, args...)
-			} else {
-				cmd = exec.Command(script.Command)
-			}
-			cmd.Dir = workDir
-
-			if len(script.EnvVars) > 0 {
-				cmd.Env = os.Environ()
-				for k, v := range script.EnvVars {
-					cmd.Env = append(cmd.Env, k+"="+v)
-				}
-			}
-
-			// Create stdin pipe
-			stdinPipe, stdinErr := cmd.StdinPipe()
-
-			r, w, err := os.Pipe()
-			if err != nil {
-				ch <- outputLine{done: true, err: err}
-				return
-			}
-			cmd.Stdout = w
-			cmd.Stderr = w
-
-			if err := cmd.Start(); err != nil {
-				w.Close()
-				r.Close()
-				ch <- outputLine{done: true, err: err}
-				return
-			}
-
-			// Send stdin pipe info via a special first message
-			if stdinErr == nil {
-				// We'll pass stdin through the started message
-				_ = stdinPipe
-			}
-
 			waitCh := make(chan error, 1)
 			go func() {
 				waitCh <- cmd.Wait()
@@ -307,8 +306,30 @@ func startScript(script ScriptEntry, scriptID int) tea.Cmd {
 			ch <- outputLine{done: true, err: cmdErr}
 		}()
 
-		return scriptStartedMsg{scriptID: scriptID, ch: ch}
+		var stdin io.WriteCloser
+		if stdinErr == nil {
+			stdin = stdinPipe
+		}
+		return scriptStartedMsg{scriptID: scriptID, ch: ch, stdin: stdin}
 	}
+}
+
+// copyToClipboard writes text to the system clipboard, trying multiple tools.
+func copyToClipboard(text string) error {
+	tools := [][]string{
+		{"clip.exe"},
+		{"wl-copy"},
+		{"xclip", "-selection", "clipboard"},
+		{"xsel", "--clipboard", "--input"},
+	}
+	for _, args := range tools {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Stdin = strings.NewReader(text)
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("no clipboard tool found (tried clip.exe, wl-copy, xclip, xsel)")
 }
 
 func listenForOutput(scriptID int, ch <-chan outputLine) tea.Cmd {
