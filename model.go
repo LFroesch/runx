@@ -160,7 +160,9 @@ type model struct {
 	outputTable table.Model
 
 	// Clear mode
-	clearDays int
+	clearDays   int
+	clearSizeMB int
+	clearBySize bool // false=age mode, true=size mode
 
 	// Sort
 	sortMode int
@@ -168,6 +170,7 @@ type model struct {
 	// Parameterized script prompt
 	paramScript *ScriptEntry
 	paramFields []string
+	paramDescs  []string // description per field (from {{name:Desc=default}})
 	paramValues []string
 	paramCursor int
 

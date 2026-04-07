@@ -1,5 +1,13 @@
 ## DevLog
 
+### 2026-04-07: Fixes + {{}} improvements
+
+- **ctrl+c fix**: moved global quit check before mode dispatch — ctrl+c now always quits, even when editing/searching/in dialogs
+- **","** key opens config file in $EDITOR (falls back to nano); reloads scripts on exit
+- **Password layout**: always reserve stdin line space (height-9) — no more layout jump when password prompt appears
+- **History size pruning**: clear dialog (c on history page) now has two modes — "age" (delete older than N days) and "size" (prune oldest until under NMB). Toggle with `tab`, adjust with `+/-`
+- **{{}} description support**: extended syntax to `{{name:Description=default}}` — description shown inline in param dialog; detail panel shows params with descriptions; help screen documents all three forms
+
 ### 2026-04-06: Bug fixes — left panel scroll, stdin pipe, copy output, ctrl+o
 
 - **Left panel scroll**: fixed `maxScroll` in `renderScriptsPage` to account for top/bottom indicator lines consuming visible rows — cursor no longer goes off-screen at bottom of long lists

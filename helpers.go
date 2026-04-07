@@ -18,7 +18,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-var placeholderRe = regexp.MustCompile(`\{\{(\w+)(?:=([^}]*))?\}\}`)
+// Placeholder syntax: {{name}}, {{name=default}}, {{name:Description=default}}
+var placeholderRe = regexp.MustCompile(`\{\{(\w+)(?::([^=}]*))?(?:=([^}]*))?\}\}`)
 
 // shellSplit splits a command string into tokens, respecting quotes.
 func shellSplit(s string) []string {
@@ -169,6 +170,7 @@ func (m *model) currentScriptIndex() int {
 
 type paramField struct {
 	Name    string
+	Desc    string // optional: from {{name:Description=default}}
 	Default string
 }
 
@@ -180,7 +182,7 @@ func extractPlaceholders(script ScriptEntry) []paramField {
 		for _, match := range matches {
 			if !seen[match[1]] {
 				seen[match[1]] = true
-				fields = append(fields, paramField{Name: match[1], Default: match[2]})
+				fields = append(fields, paramField{Name: match[1], Desc: match[2], Default: match[3]})
 			}
 		}
 	}
@@ -202,8 +204,8 @@ func substitutePlaceholders(script ScriptEntry, values map[string]string) Script
 			if v, ok := values[sub[1]]; ok {
 				return v
 			}
-			if sub[2] != "" {
-				return sub[2]
+			if sub[3] != "" { // default value (group 3)
+				return sub[3]
 			}
 			return match
 		})
@@ -315,6 +317,17 @@ func startScript(script ScriptEntry, scriptID int) tea.Cmd {
 }
 
 // copyToClipboard writes text to the system clipboard, trying multiple tools.
+// openInEditor opens the given file in $EDITOR (fallback: nano).
+func openInEditor(path string) tea.Cmd {
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "nano"
+	}
+	return tea.ExecProcess(exec.Command(editor, path), func(err error) tea.Msg {
+		return editorDoneMsg{}
+	})
+}
+
 func copyToClipboard(text string) error {
 	tools := [][]string{
 		{"clip.exe"},
@@ -455,6 +468,59 @@ func (m *model) clearOldOutputFiles() error {
 				os.Remove(filePath)
 			}
 		}
+	}
+	return nil
+}
+
+// pruneBySize deletes the oldest output files until total size is under maxMB.
+func (m *model) pruneBySize(maxMB int) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	outputDir := filepath.Join(homeDir, ".local", "share", "runx")
+	files, err := os.ReadDir(outputDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	type fileInfo struct {
+		path string
+		mod  time.Time
+		size int64
+	}
+
+	var infos []fileInfo
+	var totalBytes int64
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".txt") {
+			continue
+		}
+		p := filepath.Join(outputDir, f.Name())
+		info, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		infos = append(infos, fileInfo{path: p, mod: info.ModTime(), size: info.Size()})
+		totalBytes += info.Size()
+	}
+
+	// Sort oldest first so we delete them first
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].mod.Before(infos[j].mod)
+	})
+
+	maxBytes := int64(maxMB) * 1024 * 1024
+	for _, fi := range infos {
+		if totalBytes <= maxBytes {
+			break
+		}
+		os.Remove(fi.path)
+		totalBytes -= fi.size
 	}
 	return nil
 }

@@ -415,6 +415,23 @@ func (m model) renderDetailPanel(w int) string {
 		addField("Runs", fmt.Sprintf("%d", script.RunCount))
 	}
 
+	params := extractPlaceholders(script)
+	if len(params) > 0 {
+		lines = append(lines, "")
+		var pNames []string
+		for _, p := range params {
+			s := p.Name
+			if p.Desc != "" {
+				s += " (" + p.Desc + ")"
+			}
+			if p.Default != "" {
+				s += "=" + p.Default
+			}
+			pNames = append(pNames, s)
+		}
+		lines = append(lines, detailLabelStyle.Render("Params")+dimTextStyle.Render(strings.Join(pNames, ", ")))
+	}
+
 	lines = append(lines, "")
 	hints := keyStyle.Render("enter") + " run  " +
 		keyStyle.Render("e") + " edit  " +
@@ -568,11 +585,10 @@ func (m model) renderRunningPage() string {
 
 	// Content area
 	rs := m.runningScripts[m.activeRunTab]
-	// tabBar(1) + blank(1) + content(N) + blank(1) + status(1) = N+4, plus outer header(1)+sep(1)+sep(1)+footer(1)=4
-	visibleHeight := m.height - 8
-	if !rs.Done && rs.stdinVisible {
-		visibleHeight-- // password input line
-	}
+	// tabBar(1) + blank(1) + content(N) + blank(1) + status(1) + stdin(1) = N+5
+	// plus outer header(1)+sep(1)+sep(1)+footer(1)=4 → total m.height
+	// stdin line always reserved to avoid layout jump
+	visibleHeight := m.height - 9
 	if visibleHeight < 3 {
 		visibleHeight = 3
 	}
@@ -630,16 +646,13 @@ func (m model) renderRunningPage() string {
 
 	lineInfo := dimTextStyle.Render(fmt.Sprintf("  %d lines", len(rs.Lines)))
 
-	// Stdin input — only shown when a password/passphrase prompt is detected
+	// Stdin line — always rendered to avoid layout jump; shows input only when active
 	var stdinLine string
 	if !rs.Done && rs.stdinVisible {
 		stdinLine = warnTextStyle.Render("  password> ") + m.stdinInput.View()
 	}
 
-	parts := []string{tabBar, "", content, "", statusInfo + lineInfo}
-	if stdinLine != "" {
-		parts = append(parts, stdinLine)
-	}
+	parts := []string{tabBar, "", content, "", statusInfo + lineInfo, stdinLine}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
@@ -691,8 +704,28 @@ func (m model) renderDeleteDialog() string {
 func (m model) renderClearDialog() string {
 	var lines []string
 	lines = append(lines, warnTextStyle.Render("Clear Output History"), "")
-	lines = append(lines, fmt.Sprintf("  Delete files older than %s",
-		keyStyle.Render(fmt.Sprintf("%d days", m.clearDays))))
+
+	ageTab := "age"
+	sizeTab := "size"
+	if m.clearBySize {
+		ageTab = dimTextStyle.Render(ageTab)
+		sizeTab = keyStyle.Render(sizeTab)
+	} else {
+		ageTab = keyStyle.Render(ageTab)
+		sizeTab = dimTextStyle.Render(sizeTab)
+	}
+	lines = append(lines, "  Mode: "+ageTab+" · "+sizeTab+"  "+dimTextStyle.Render("(tab to switch)"))
+	lines = append(lines, "")
+
+	if m.clearBySize {
+		lines = append(lines, fmt.Sprintf("  Prune to %s total",
+			keyStyle.Render(fmt.Sprintf("%dMB", m.clearSizeMB))))
+		lines = append(lines, dimTextStyle.Render("  Deletes oldest files first"))
+	} else {
+		lines = append(lines, fmt.Sprintf("  Delete files older than %s",
+			keyStyle.Render(fmt.Sprintf("%d days", m.clearDays))))
+	}
+
 	lines = append(lines, "")
 	lines = append(lines,
 		keyStyle.Render("+/-")+" adjust   "+
@@ -701,7 +734,7 @@ func (m model) renderClearDialog() string {
 
 	dialog := dialogStyle.
 		BorderForeground(colorWarn).
-		Width(45).
+		Width(48).
 		Render(strings.Join(lines, "\n"))
 
 	return lipgloss.Place(m.width, m.height,
@@ -716,20 +749,22 @@ func (m model) renderParamDialog() string {
 		return ""
 	}
 
-	w := 60
+	w := 64
 	if m.width-8 < w {
 		w = m.width - 8
 	}
 
 	var lines []string
-	lines = append(lines, titleStyle.Render("Parameters"), "")
-	lines = append(lines, dimTextStyle.Render(m.paramScript.Name))
-	lines = append(lines, dimTextStyle.Render(m.paramScript.FullCommand()), "")
+	lines = append(lines, titleStyle.Render("Run: ")+dimTextStyle.Render(m.paramScript.Name), "")
 
 	for i, field := range m.paramFields {
+		desc := ""
+		if i < len(m.paramDescs) && m.paramDescs[i] != "" {
+			desc = "  " + dimTextStyle.Render(m.paramDescs[i])
+		}
 		label := fieldLabelStyle.Render(field)
 		if i == m.paramCursor {
-			lines = append(lines, label+m.textInput.View())
+			lines = append(lines, label+m.textInput.View()+desc)
 		} else {
 			val := m.paramValues[i]
 			if val == "" {
@@ -737,7 +772,7 @@ func (m model) renderParamDialog() string {
 			} else {
 				val = inactiveFieldStyle.Render(val)
 			}
-			lines = append(lines, label+val)
+			lines = append(lines, label+val+desc)
 		}
 	}
 
@@ -809,6 +844,12 @@ func (m model) renderHelp() string {
 			{"d", "Delete script"},
 			{"/", "Search / filter"},
 			{"s", "Sort (name/runs/recent)"},
+			{",", "Open config file"},
+		}},
+		{"Params ({{}})", []helpKey{
+			{"{{name}}", "Prompt for value before run"},
+			{"{{name=default}}", "Prompt with pre-filled default"},
+			{"{{name:Desc=default}}", "Prompt with description label"},
 		}},
 		{"Edit", []helpKey{
 			{"tab/shift+tab", "Next / prev field"},

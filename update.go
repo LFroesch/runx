@@ -36,7 +36,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case scriptLineMsg:
 		if rs := m.findRunningScript(msg.scriptID); rs != nil {
 			rs.Lines = append(rs.Lines, msg.line)
-			visH := m.height - 8 // matches renderRunningPage visibleHeight
+			visH := m.height - 9 // matches renderRunningPage visibleHeight
 			maxScroll := len(rs.Lines) - visH
 			if maxScroll < 0 {
 				maxScroll = 0
@@ -103,6 +103,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// ctrl+c always quits regardless of mode
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
 		// Handle modal modes first
 		switch m.mode {
 		case modeDryRun:
@@ -128,8 +132,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Normal mode — global keys
 		switch msg.String() {
-		case "ctrl+c":
-			return m, tea.Quit
 		case "q":
 			if m.page == pageScripts {
 				return m, tea.Quit
@@ -274,7 +276,7 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			rs.Scroll--
 		}
 	case "down", "j":
-		maxScroll := len(rs.Lines) - (m.height - 8)
+		maxScroll := len(rs.Lines) - (m.height - 9)
 		if maxScroll < 0 {
 			maxScroll = 0
 		}
@@ -282,7 +284,7 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			rs.Scroll++
 		}
 	case "G":
-		maxScroll := len(rs.Lines) - (m.height - 8)
+		maxScroll := len(rs.Lines) - (m.height - 9)
 		if maxScroll < 0 {
 			maxScroll = 0
 		}
@@ -290,8 +292,8 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "g":
 		rs.Scroll = 0
 	case "ctrl+d", "pagedown":
-		pageSize := (m.height - 8) / 2
-		maxScroll := len(rs.Lines) - (m.height - 8)
+		pageSize := (m.height - 9) / 2
+		maxScroll := len(rs.Lines) - (m.height - 9)
 		if maxScroll < 0 {
 			maxScroll = 0
 		}
@@ -300,7 +302,7 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			rs.Scroll = maxScroll
 		}
 	case "ctrl+u", "pageup":
-		pageSize := (m.height - 8) / 2
+		pageSize := (m.height - 9) / 2
 		rs.Scroll -= pageSize
 		if rs.Scroll < 0 {
 			rs.Scroll = 0
@@ -363,23 +365,46 @@ func (m model) updateClearMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "q":
 		m.mode = modeNormal
 		return m, nil
+	case "tab":
+		m.clearBySize = !m.clearBySize
+		return m, nil
 	case "+", "=":
-		if m.clearDays < 365 {
-			m.clearDays++
+		if m.clearBySize {
+			if m.clearSizeMB < 1000 {
+				m.clearSizeMB += 10
+			}
+		} else {
+			if m.clearDays < 365 {
+				m.clearDays++
+			}
 		}
 	case "-":
-		if m.clearDays > 1 {
-			m.clearDays--
+		if m.clearBySize {
+			if m.clearSizeMB > 10 {
+				m.clearSizeMB -= 10
+			}
+		} else {
+			if m.clearDays > 1 {
+				m.clearDays--
+			}
 		}
 	case "enter", " ":
-		err := m.clearOldOutputFiles()
+		var err error
+		var msg string
+		if m.clearBySize {
+			err = m.pruneBySize(m.clearSizeMB)
+			msg = fmt.Sprintf("Pruned history to %dMB", m.clearSizeMB)
+		} else {
+			err = m.clearOldOutputFiles()
+			msg = fmt.Sprintf("Cleared files older than %d days", m.clearDays)
+		}
 		m.mode = modeNormal
 		if err != nil {
 			return m, showStatus(fmt.Sprintf("Failed: %v", err))
 		}
 		m.loadOutputFiles()
 		m.updateOutputTable()
-		return m, showStatus(fmt.Sprintf("Cleared files older than %d days", m.clearDays))
+		return m, showStatus(msg)
 	}
 	return m, nil
 }
@@ -582,27 +607,15 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if script != nil {
 			params := extractPlaceholders(*script)
 			if len(params) > 0 {
-				allHaveDefaults := true
-				for _, p := range params {
-					if p.Default == "" {
-						allHaveDefaults = false
-						break
-					}
-				}
-				if allHaveDefaults {
-					values := make(map[string]string)
-					for _, p := range params {
-						values[p.Name] = p.Default
-					}
-					resolved := substitutePlaceholders(*script, values)
-					return m, m.runScript(resolved, true)
-				}
+				// Always show dialog — defaults are pre-filled, not auto-submitted
 				m.mode = modeParamPrompt
 				m.paramScript = script
 				m.paramFields = make([]string, len(params))
+				m.paramDescs = make([]string, len(params))
 				m.paramValues = make([]string, len(params))
 				for i, p := range params {
 					m.paramFields[i] = p.Name
+					m.paramDescs[i] = p.Desc
 					m.paramValues[i] = p.Default
 				}
 				m.paramCursor = 0
@@ -626,6 +639,8 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateVisibleScripts()
 		labels := []string{"name", "run count", "last run"}
 		return m, showStatus(fmt.Sprintf("Sort: %s", labels[m.sortMode]))
+	case ",":
+		return m, openInEditor(m.configFile)
 	case "r":
 		m.scripts = loadScripts(m.configFile)
 		m.updateVisibleScripts()
@@ -760,6 +775,8 @@ func (m model) updateHistoryPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "c":
 		m.mode = modeClear
 		m.clearDays = 7
+		m.clearSizeMB = 50
+		m.clearBySize = false
 		return m, nil
 	case "r":
 		m.loadOutputFiles()
