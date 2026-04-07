@@ -44,9 +44,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if rs.Scroll >= maxScroll-1 {
 				rs.Scroll = maxScroll
 			}
-			// Detect password/passphrase prompts and mask stdin input
+			// Detect password/passphrase prompts and show masked input
 			lower := strings.ToLower(msg.line)
 			if rs.stdin != nil && (strings.Contains(lower, "password") || strings.Contains(lower, "passphrase")) {
+				rs.stdinVisible = true
 				m.stdinInput.EchoMode = textinput.EchoPassword
 				m.stdinInput.Focus()
 			}
@@ -123,8 +124,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSearch(msg)
 		case modeScheduleEdit:
 			return m.updateScheduleEdit(msg)
-		case modeFilePicker:
-			return m.updateFilePicker(msg)
 		}
 
 		// Normal mode — global keys
@@ -174,20 +173,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.mode == modeScriptEdit {
 		var cmd tea.Cmd
 		m.scriptEditArea, cmd = m.scriptEditArea.Update(msg)
-		return m, cmd
-	}
-
-	// Handle filepicker messages (non-key)
-	if m.mode == modeFilePicker {
-		var cmd tea.Cmd
-		m.filePicker, cmd = m.filePicker.Update(msg)
-		if m.filePicker.Path != "" {
-			path := m.filePicker.Path
-			m.filePicker.Path = ""
-			m.mode = modeEdit
-			m.textInput.SetValue(path)
-			return m, nil
-		}
 		return m, cmd
 	}
 
@@ -326,17 +311,18 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, showStatus(fmt.Sprintf("Copied %d lines", len(rs.Lines)))
 	case "enter":
-		if !rs.Done && rs.stdin != nil {
+		if !rs.Done && rs.stdin != nil && rs.stdinVisible {
 			text := m.stdinInput.Value() + "\n"
 			rs.stdin.Write([]byte(text)) //nolint:errcheck
 			m.stdinInput.SetValue("")
 			m.stdinInput.EchoMode = textinput.EchoNormal
+			rs.stdinVisible = false
 			return m, nil
 		}
 	}
 
-	// Route unhandled keys to stdin input when script is running interactively
-	if !rs.Done && rs.stdin != nil {
+	// Route unhandled keys to stdin input when password prompt is active
+	if !rs.Done && rs.stdin != nil && rs.stdinVisible {
 		var cmd tea.Cmd
 		m.stdinInput, cmd = m.stdinInput.Update(msg)
 		return m, cmd
@@ -419,17 +405,6 @@ func (m model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editCol = (m.editCol - 1 + editFieldCount) % editFieldCount
 		m.loadEditField()
 		return m, nil
-	case "ctrl+f", "ctrl+o":
-		// Open file picker — navigate to Work Dir field first if not already there
-		m.saveEdit()
-		m.editCol = 4
-		m.loadEditField()
-		m.mode = modeFilePicker
-		m.filePicker.Path = ""
-		if m.editRow >= 0 && m.editRow < len(m.scripts) && m.scripts[m.editRow].WorkDir != "" {
-			m.filePicker.CurrentDirectory = expandPath(m.scripts[m.editRow].WorkDir)
-		}
-		return m, m.filePicker.Init()
 	}
 
 	var cmd tea.Cmd
@@ -463,26 +438,6 @@ func (m model) updateScriptEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // --- File picker ---
-
-func (m model) updateFilePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.mode = modeEdit
-		m.loadEditField()
-		return m, nil
-	}
-
-	var cmd tea.Cmd
-	m.filePicker, cmd = m.filePicker.Update(msg)
-	if m.filePicker.Path != "" {
-		path := m.filePicker.Path
-		m.filePicker.Path = ""
-		m.mode = modeEdit
-		m.textInput.SetValue(path)
-		return m, nil
-	}
-	return m, cmd
-}
 
 // --- Search ---
 

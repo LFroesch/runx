@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -36,7 +35,6 @@ const (
 	modeDryRun
 	modeParamPrompt
 	modeScheduleEdit
-	modeFilePicker
 )
 
 const (
@@ -90,17 +88,18 @@ type outputLine struct {
 }
 
 type RunningScript struct {
-	ID        int
-	Name      string
-	WorkDir   string
-	Lines     []string
-	Done      bool
-	Err       error
-	Scroll    int
-	StartTime time.Time
-	EndTime   time.Time
-	ch        <-chan outputLine
-	stdin     io.WriteCloser
+	ID           int
+	Name         string
+	WorkDir      string
+	Lines        []string
+	Done         bool
+	Err          error
+	Scroll       int
+	StartTime    time.Time
+	EndTime      time.Time
+	ch           <-chan outputLine
+	stdin        io.WriteCloser
+	stdinVisible bool // set true when password/passphrase prompt detected
 }
 
 func (r *RunningScript) Output() string {
@@ -176,9 +175,6 @@ type model struct {
 	cronTable      table.Model
 	schedEditIndex int
 	lastCronCheck  time.Time
-
-	// File picker
-	filePicker filepicker.Model
 
 	// Script textarea editor (E key)
 	scriptEditArea textarea.Model

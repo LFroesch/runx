@@ -30,10 +30,6 @@ func (m model) View() string {
 	if m.mode == modeScheduleEdit {
 		return m.renderScheduleEditDialog()
 	}
-	if m.mode == modeFilePicker {
-		return m.renderFilePickerOverlay()
-	}
-
 	// --- Main page view ---
 	header := m.renderHeader()
 	sep := dimTextStyle.Render(strings.Repeat("─", m.width))
@@ -170,7 +166,6 @@ func (m model) renderFooter() string {
 			add("tab", "next")
 			add("shift+tab", "prev")
 			add("enter", "save")
-			add("ctrl+o", "browse")
 			add("esc", "cancel")
 		} else if m.mode == modeScriptEdit {
 			add("ctrl+s", "save")
@@ -474,9 +469,6 @@ func (m model) renderEditPanel(w int) string {
 	hints := fmt.Sprintf("%s next  %s prev  %s save  %s cancel",
 		keyStyle.Render("tab"), keyStyle.Render("shift+tab"),
 		keyStyle.Render("enter"), keyStyle.Render("esc"))
-	if m.editCol == 4 { // Work Dir field
-		hints += "  " + keyStyle.Render("ctrl+o") + " browse"
-	}
 	lines = append(lines, dimTextStyle.Render(hints))
 
 	return strings.Join(lines, "\n")
@@ -578,8 +570,8 @@ func (m model) renderRunningPage() string {
 	rs := m.runningScripts[m.activeRunTab]
 	// tabBar(1) + blank(1) + content(N) + blank(1) + status(1) = N+4, plus outer header(1)+sep(1)+sep(1)+footer(1)=4
 	visibleHeight := m.height - 8
-	if !rs.Done && rs.stdin != nil {
-		visibleHeight-- // stdin line
+	if !rs.Done && rs.stdinVisible {
+		visibleHeight-- // password input line
 	}
 	if visibleHeight < 3 {
 		visibleHeight = 3
@@ -638,21 +630,17 @@ func (m model) renderRunningPage() string {
 
 	lineInfo := dimTextStyle.Render(fmt.Sprintf("  %d lines", len(rs.Lines)))
 
-	// Stdin input for running scripts
+	// Stdin input — only shown when a password/passphrase prompt is detected
 	var stdinLine string
-	if !rs.Done && rs.stdin != nil {
-		prompt := dimTextStyle.Render("  input> ")
-		if m.stdinInput.EchoMode == 1 { // EchoPassword
-			prompt = warnTextStyle.Render("  password> ")
-		}
-		stdinLine = "\n" + prompt + m.stdinInput.View() + dimTextStyle.Render("  enter to send")
+	if !rs.Done && rs.stdinVisible {
+		stdinLine = warnTextStyle.Render("  password> ") + m.stdinInput.View()
 	}
 
-	result := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", content, "", statusInfo+lineInfo)
+	parts := []string{tabBar, "", content, "", statusInfo + lineInfo}
 	if stdinLine != "" {
-		result += stdinLine
+		parts = append(parts, stdinLine)
 	}
-	return result
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 func (m model) renderEmptyState(title, subtitle string) string {
@@ -796,27 +784,6 @@ func (m model) renderScheduleEditDialog() string {
 		dialog)
 }
 
-// --- File picker overlay ---
-
-func (m model) renderFilePickerOverlay() string {
-	w := m.width - 8
-	if w > 80 {
-		w = 80
-	}
-
-	var lines []string
-	lines = append(lines, titleStyle.Render("Select Directory"), "")
-	lines = append(lines, m.filePicker.View())
-	lines = append(lines, "")
-	lines = append(lines, dimTextStyle.Render(keyStyle.Render("enter")+" select  "+keyStyle.Render("esc")+" cancel"))
-
-	dialog := dialogStyle.Width(w).Render(strings.Join(lines, "\n"))
-
-	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center,
-		dialog)
-}
-
 // --- Help overlay ---
 
 func (m model) renderHelp() string {
@@ -846,7 +813,6 @@ func (m model) renderHelp() string {
 		{"Edit", []helpKey{
 			{"tab/shift+tab", "Next / prev field"},
 			{"enter", "Save"},
-			{"ctrl+o", "Browse directory (work dir)"},
 			{"esc", "Cancel"},
 		}},
 		{"Schedules", []helpKey{

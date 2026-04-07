@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -34,13 +33,6 @@ func main() {
 	ea.CharLimit = 0
 	ea.ShowLineNumbers = false
 
-	fp := filepicker.New()
-	fp.CurrentDirectory = homeDir
-	fp.AllowedTypes = []string{} // allow all (directories)
-	fp.ShowHidden = false
-	fp.DirAllowed = true
-	fp.FileAllowed = false
-
 	m := model{
 		scripts:        loadScripts(configFile),
 		configFile:     configFile,
@@ -56,7 +48,6 @@ func main() {
 		searchInput:    si,
 		stdinInput:     stdinTi,
 		clearDays:      7,
-		filePicker:     fp,
 		scriptEditArea: ea,
 	}
 
