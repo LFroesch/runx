@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,6 +25,17 @@ func main() {
 	si.Placeholder = "search..."
 	si.CharLimit = 100
 
+	stdinTi := textinput.New()
+	stdinTi.Placeholder = "stdin input..."
+	stdinTi.CharLimit = 2000
+
+	fp := filepicker.New()
+	fp.CurrentDirectory = homeDir
+	fp.AllowedTypes = []string{} // allow all (directories)
+	fp.ShowHidden = false
+	fp.DirAllowed = true
+	fp.FileAllowed = false
+
 	m := model{
 		scripts:     loadScripts(configFile),
 		configFile:  configFile,
@@ -36,24 +48,10 @@ func main() {
 		deleteIndex: -1,
 		textInput:   ti,
 		searchInput: si,
+		stdinInput:  stdinTi,
 		clearDays:   7,
+		filePicker:  fp,
 	}
-
-	m.allColumns = []table.Column{
-		{Title: "Name", Width: 25},
-		{Title: "Command", Width: 45},
-		{Title: "Runs", Width: 6},
-		{Title: "Work Dir", Width: 20},
-		{Title: "Description", Width: 25},
-		{Title: "Last Run", Width: 18},
-	}
-
-	t := table.New(
-		table.WithColumns(m.allColumns[:3]),
-		table.WithFocused(true),
-		table.WithHeight(10),
-	)
-	m.table = styledTable(t)
 
 	outputTable := table.New(
 		table.WithColumns([]table.Column{
@@ -80,8 +78,7 @@ func main() {
 	)
 	m.cronTable = styledTable(cronTable)
 
-	m.adjustLayout()
-	m.updateTable()
+	m.updateVisibleScripts()
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {

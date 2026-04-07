@@ -10,6 +10,7 @@ var (
 	colorError   = lipgloss.Color("#FF5C57") // red
 	colorDim     = lipgloss.Color("#606060")
 	colorText    = lipgloss.Color("#EEEEEE")
+	colorBg      = lipgloss.Color("#1A1A2E")
 
 	// Header
 	titleStyle = lipgloss.NewStyle().
@@ -25,7 +26,7 @@ var (
 	inactivePageStyle = lipgloss.NewStyle().
 				Foreground(colorDim)
 
-	// Status bar keys
+	// Keys / actions
 	keyStyle = lipgloss.NewStyle().
 			Foreground(colorAccent).
 			Bold(true)
@@ -60,6 +61,29 @@ var (
 			BorderForeground(colorAccent).
 			Padding(1, 2)
 
+	// Split panel styles
+	panelStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorDim).
+			Padding(0, 1)
+
+	panelActiveStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorAccent).
+				Padding(0, 1)
+
+	panelHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorAccent)
+
+	categoryHeaderStyle = lipgloss.NewStyle().
+				Foreground(colorWarn).
+				Bold(true)
+
+	selectedItemStyle = lipgloss.NewStyle().
+				Foreground(colorPrimary).
+				Bold(true)
+
 	// Tabs for running scripts
 	activeTabStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -78,4 +102,12 @@ var (
 
 	inactiveFieldStyle = lipgloss.NewStyle().
 				Foreground(colorDim)
+
+	// Detail view labels
+	detailLabelStyle = lipgloss.NewStyle().
+				Foreground(colorAccent).
+				Width(12)
+
+	detailValueStyle = lipgloss.NewStyle().
+				Foreground(colorText)
 )

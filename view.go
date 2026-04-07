@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -17,23 +18,20 @@ func (m model) View() string {
 	if m.mode == modeHelp {
 		return m.renderHelp()
 	}
-	if m.mode == modeEdit {
-		return m.renderEditDialog()
-	}
 	if m.mode == modeDeleteConfirm {
 		return m.renderDeleteDialog()
 	}
 	if m.mode == modeClear {
 		return m.renderClearDialog()
 	}
-	if m.mode == modeDryRun {
-		return m.renderDryRunDialog()
-	}
 	if m.mode == modeParamPrompt {
 		return m.renderParamDialog()
 	}
 	if m.mode == modeScheduleEdit {
 		return m.renderScheduleEditDialog()
+	}
+	if m.mode == modeFilePicker {
+		return m.renderFilePickerOverlay()
 	}
 
 	// --- Main page view ---
@@ -168,13 +166,21 @@ func (m model) renderFooter() string {
 
 	switch m.page {
 	case pageScripts:
-		add("enter", "run")
-		add("D", "dry run")
-		add("e", "edit")
-		add("n", "add")
-		add("d", "delete")
-		add("/", "search")
-		add("s", "sort")
+		if m.mode == modeEdit {
+			add("tab", "next")
+			add("shift+tab", "prev")
+			add("enter", "save")
+			add("ctrl+f", "browse")
+			add("esc", "cancel")
+		} else {
+			add("enter", "run")
+			add("D", "dry run")
+			add("e", "edit")
+			add("n", "add")
+			add("d", "delete")
+			add("/", "search")
+			add("s", "sort")
+		}
 	case pageSchedules:
 		add("enter", "toggle")
 		add("e", "set interval")
@@ -197,14 +203,289 @@ func (m model) renderFooter() string {
 	return " " + strings.Join(parts, "")
 }
 
-// --- Page content ---
+// --- Scripts page: split panel ---
 
 func (m model) renderScriptsPage() string {
 	if len(m.scripts) == 0 {
 		return m.renderEmptyState("No scripts yet", "Press n to add your first script")
 	}
-	return m.table.View()
+
+	contentH := m.height - 6
+	if contentH < 5 {
+		contentH = 5
+	}
+
+	leftW := 28
+	if m.width < 80 {
+		leftW = m.width / 3
+	}
+	rightW := m.width - leftW - 5 // account for borders + gap
+
+	// Build left panel items
+	items := m.buildLeftPanelItems()
+
+	// Render left panel
+	var leftLines []string
+	visibleH := contentH - 2 // panel border padding
+
+	// Clamp scroll
+	maxScroll := len(items) - visibleH
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	scroll := m.leftScroll
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+
+	// Scroll indicator top
+	if scroll > 0 {
+		leftLines = append(leftLines, dimTextStyle.Render(fmt.Sprintf("  ▲ %d more", scroll)))
+		visibleH--
+	}
+
+	endIdx := scroll + visibleH
+	if endIdx > len(items) {
+		endIdx = len(items)
+	}
+
+	// Bottom indicator check
+	remaining := len(items) - endIdx
+	if remaining > 0 {
+		visibleH-- // reserve line for bottom indicator
+		endIdx = scroll + visibleH
+		if scroll > 0 {
+			endIdx++ // we already subtracted one for top indicator
+		}
+		if endIdx > len(items) {
+			endIdx = len(items)
+		}
+	}
+
+	for i := scroll; i < endIdx; i++ {
+		item := items[i]
+		if item.isHeader {
+			leftLines = append(leftLines, categoryHeaderStyle.Render(item.label))
+		} else {
+			name := item.label
+			if len(name) > leftW-4 {
+				name = name[:leftW-7] + "..."
+			}
+			if item.scriptIdx == m.scriptCursor {
+				leftLines = append(leftLines, selectedItemStyle.Render("▸ "+name))
+			} else {
+				leftLines = append(leftLines, dimTextStyle.Render("  "+name))
+			}
+		}
+	}
+
+	// Scroll indicator bottom
+	remaining = len(items) - endIdx
+	if remaining > 0 {
+		leftLines = append(leftLines, dimTextStyle.Render(fmt.Sprintf("  ▼ %d more", remaining)))
+	}
+
+	// Pad to height
+	for len(leftLines) < contentH-2 {
+		leftLines = append(leftLines, "")
+	}
+
+	leftContent := strings.Join(leftLines, "\n")
+	leftPanel := panelActiveStyle.Width(leftW).Height(contentH - 2).Render(leftContent)
+
+	// Render right panel
+	var rightContent string
+	if m.mode == modeEdit {
+		rightContent = m.renderEditPanel(rightW)
+	} else if m.mode == modeDryRun {
+		rightContent = m.renderDryRunPanel(rightW)
+	} else {
+		rightContent = m.renderDetailPanel(rightW)
+	}
+	rightPanel := panelStyle.Width(rightW).Height(contentH - 2).Render(rightContent)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, " ", rightPanel)
 }
+
+// buildLeftPanelItems creates the display list with category headers interleaved.
+func (m model) buildLeftPanelItems() []leftPanelItem {
+	var items []leftPanelItem
+	lastCat := ""
+
+	for i, idx := range m.visibleScripts {
+		script := m.scripts[idx]
+		cat := script.Category
+		if cat == "" {
+			cat = "General"
+		}
+		if m.sortMode == sortByName && cat != lastCat {
+			items = append(items, leftPanelItem{isHeader: true, label: cat, scriptIdx: -1})
+			lastCat = cat
+		}
+		items = append(items, leftPanelItem{isHeader: false, label: script.Name, scriptIdx: i})
+	}
+	return items
+}
+
+// renderDetailPanel shows script details in the right panel.
+func (m model) renderDetailPanel(w int) string {
+	if m.scriptCursor < 0 || m.scriptCursor >= len(m.visibleScripts) {
+		return dimTextStyle.Render("No script selected")
+	}
+
+	script := m.scripts[m.visibleScripts[m.scriptCursor]]
+	valW := w - 14
+
+	var lines []string
+	lines = append(lines, titleStyle.Render(script.Name))
+	lines = append(lines, dimTextStyle.Render(strings.Repeat("─", w-4)))
+	lines = append(lines, "")
+
+	addField := func(label, value string) {
+		if value == "" {
+			value = dimTextStyle.Render("—")
+		} else {
+			value = xansi.Truncate(value, valW, "...")
+		}
+		lines = append(lines, detailLabelStyle.Render(label)+value)
+	}
+
+	addField("Category", script.Category)
+	addField("Command", script.Command)
+	if len(script.Flags) > 0 {
+		addField("Flags", strings.Join(script.Flags, " "))
+	}
+	if len(script.Args) > 0 {
+		addField("Args", strings.Join(script.Args, " "))
+	}
+	addField("Work Dir", script.WorkDir)
+	addField("Desc", script.Description)
+	if len(script.Tags) > 0 {
+		addField("Tags", strings.Join(script.Tags, ", "))
+	}
+	if len(script.EnvVars) > 0 {
+		var pairs []string
+		for k, v := range script.EnvVars {
+			pairs = append(pairs, k+"="+v)
+		}
+		addField("Env Vars", strings.Join(pairs, ", "))
+	}
+	if script.Schedule != "" {
+		status := "OFF"
+		if script.ScheduleOn {
+			status = "ON"
+		}
+		addField("Schedule", fmt.Sprintf("every %s (%s)", script.Schedule, status))
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, dimTextStyle.Render(strings.Repeat("─", w-4)))
+
+	if script.LastRun != "" {
+		addField("Last Run", script.LastRun)
+	}
+	if script.RunCount > 0 {
+		addField("Runs", fmt.Sprintf("%d", script.RunCount))
+	}
+
+	lines = append(lines, "")
+	hints := keyStyle.Render("enter") + " run  " +
+		keyStyle.Render("e") + " edit  " +
+		keyStyle.Render("D") + " dry run"
+	lines = append(lines, hints)
+
+	return strings.Join(lines, "\n")
+}
+
+// renderEditPanel shows inline edit form in the right panel.
+func (m model) renderEditPanel(w int) string {
+	if m.editRow < 0 || m.editRow >= len(m.scripts) {
+		return ""
+	}
+
+	script := m.scripts[m.editRow]
+
+	fields := m.editFields(script)
+
+	var lines []string
+	lines = append(lines, titleStyle.Render("Edit Script"))
+	lines = append(lines, "")
+
+	for i, f := range fields {
+		label := fieldLabelStyle.Render(f.label)
+		if i == m.editCol {
+			lines = append(lines, label+m.textInput.View())
+		} else {
+			val := f.value
+			if val == "" {
+				val = dimTextStyle.Render("(empty)")
+			} else {
+				val = inactiveFieldStyle.Render(xansi.Truncate(val, w-16, "..."))
+			}
+			lines = append(lines, label+val)
+		}
+	}
+
+	lines = append(lines, "")
+	hints := fmt.Sprintf("%s next  %s prev  %s save  %s cancel",
+		keyStyle.Render("tab"), keyStyle.Render("shift+tab"),
+		keyStyle.Render("enter"), keyStyle.Render("esc"))
+	if m.editCol == 4 { // Work Dir field
+		hints += "  " + keyStyle.Render("ctrl+f") + " browse"
+	}
+	lines = append(lines, dimTextStyle.Render(hints))
+
+	return strings.Join(lines, "\n")
+}
+
+// renderDryRunPanel shows dry run preview in the right panel.
+func (m model) renderDryRunPanel(w int) string {
+	if m.scriptCursor < 0 || m.scriptCursor >= len(m.visibleScripts) {
+		return ""
+	}
+
+	script := m.scripts[m.visibleScripts[m.scriptCursor]]
+
+	var lines []string
+	lines = append(lines, titleStyle.Render("Dry Run Preview"))
+	lines = append(lines, "")
+
+	addField := func(label, value string) {
+		lines = append(lines, fieldLabelStyle.Render(label)+value)
+	}
+
+	addField("Name", script.Name)
+	addField("Command", script.FullCommand())
+	addField("Work Dir", expandPath(script.WorkDir))
+	if len(script.Tags) > 0 {
+		addField("Tags", strings.Join(script.Tags, ", "))
+	}
+	if len(script.EnvVars) > 0 {
+		var pairs []string
+		for k, v := range script.EnvVars {
+			pairs = append(pairs, k+"="+v)
+		}
+		addField("Env Vars", strings.Join(pairs, ", "))
+	}
+	if script.Schedule != "" {
+		status := "OFF"
+		if script.ScheduleOn {
+			status = "ON"
+		}
+		addField("Schedule", fmt.Sprintf("every %s (%s)", script.Schedule, status))
+	}
+	if script.RunCount > 0 {
+		addField("Run Count", fmt.Sprintf("%d", script.RunCount))
+	}
+	if script.LastRun != "" {
+		addField("Last Run", script.LastRun)
+	}
+	lines = append(lines, "", dimTextStyle.Render("Press any key to close"))
+
+	return strings.Join(lines, "\n")
+}
+
+// --- Other pages ---
 
 func (m model) renderSchedulesPage() string {
 	if len(m.scripts) == 0 {
@@ -290,7 +571,7 @@ func (m model) renderRunningPage() string {
 	content := contentStyle.Render(visibleContent)
 
 	// Elapsed time + status
-	elapsed := time.Since(rs.StartTime).Truncate(time.Second)
+	elapsed := rs.Elapsed()
 	var statusInfo string
 	if rs.Done {
 		if rs.Err != nil {
@@ -304,7 +585,17 @@ func (m model) renderRunningPage() string {
 
 	lineInfo := dimTextStyle.Render(fmt.Sprintf("  %d lines", len(rs.Lines)))
 
-	return lipgloss.JoinVertical(lipgloss.Left, tabBar, "", content, "", statusInfo+lineInfo)
+	// Stdin input for running scripts
+	var stdinLine string
+	if !rs.Done && rs.stdin != nil {
+		stdinLine = "\n" + dimTextStyle.Render("  > ") + m.stdinInput.View()
+	}
+
+	result := lipgloss.JoinVertical(lipgloss.Left, tabBar, "", content, "", statusInfo+lineInfo)
+	if stdinLine != "" {
+		result += stdinLine
+	}
+	return result
 }
 
 func (m model) renderEmptyState(title, subtitle string) string {
@@ -321,73 +612,6 @@ func (m model) renderEmptyState(title, subtitle string) string {
 	return lipgloss.Place(m.width-4, h, lipgloss.Center, lipgloss.Center, content)
 }
 
-// --- Edit dialog ---
-
-func (m model) renderEditDialog() string {
-	if m.editRow < 0 || m.editRow >= len(m.scripts) {
-		return ""
-	}
-
-	w := m.width - 6
-	w = int(w * 3 / 4)
-
-	script := m.scripts[m.editRow]
-	cmdStr := script.Command
-	if len(script.Args) > 0 {
-		cmdStr = script.Command + " " + strings.Join(script.Args, " ")
-	}
-
-	tagsStr := strings.Join(script.Tags, ", ")
-	var envPairs []string
-	for k, v := range script.EnvVars {
-		envPairs = append(envPairs, k+"="+v)
-	}
-	envStr := strings.Join(envPairs, ", ")
-
-	fields := []struct {
-		label string
-		value string
-	}{
-		{"Name", script.Name},
-		{"Category", script.Category},
-		{"Command", cmdStr},
-		{"Work Dir", script.WorkDir},
-		{"Description", script.Description},
-		{"Tags", tagsStr},
-		{"Env Vars", envStr},
-	}
-
-	var lines []string
-	lines = append(lines, titleStyle.Render("Edit Script"), "")
-
-	for i, f := range fields {
-		label := fieldLabelStyle.Render(f.label)
-		if i == m.editCol {
-			lines = append(lines, label+m.textInput.View())
-		} else {
-			val := f.value
-			if val == "" {
-				val = dimTextStyle.Render("(empty)")
-			} else {
-				val = inactiveFieldStyle.Render(val)
-			}
-			lines = append(lines, label+val)
-		}
-	}
-
-	lines = append(lines, "")
-	hints := fmt.Sprintf("%s next  %s prev  %s save  %s cancel",
-		keyStyle.Render("tab"), keyStyle.Render("shift+tab"),
-		keyStyle.Render("enter"), keyStyle.Render("esc"))
-	lines = append(lines, dimTextStyle.Render(hints))
-
-	dialog := dialogStyle.Width(w).Render(strings.Join(lines, "\n"))
-
-	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center,
-		dialog)
-}
-
 // --- Delete confirmation dialog ---
 
 func (m model) renderDeleteDialog() string {
@@ -396,15 +620,11 @@ func (m model) renderDeleteDialog() string {
 	}
 
 	script := m.scripts[m.deleteIndex]
-	cmdStr := script.Command
-	if len(script.Args) > 0 {
-		cmdStr += " " + strings.Join(script.Args, " ")
-	}
 
 	var lines []string
 	lines = append(lines, errorTextStyle.Render("Delete Script?"), "")
 	lines = append(lines, fieldLabelStyle.Render("Name")+script.Name)
-	lines = append(lines, fieldLabelStyle.Render("Command")+dimTextStyle.Render(truncate(cmdStr, 35)))
+	lines = append(lines, fieldLabelStyle.Render("Command")+dimTextStyle.Render(truncate(script.FullCommand(), 35)))
 	if script.RunCount > 0 {
 		lines = append(lines, fieldLabelStyle.Render("Runs")+fmt.Sprintf("%d", script.RunCount))
 	}
@@ -444,60 +664,6 @@ func (m model) renderClearDialog() string {
 		dialog)
 }
 
-// --- Dry run dialog ---
-
-func (m model) renderDryRunDialog() string {
-	script := m.getScriptByDisplayIndex(m.table.Cursor())
-	if script == nil {
-		return ""
-	}
-
-	cmdStr := script.Command
-	if len(script.Args) > 0 {
-		cmdStr += " " + strings.Join(script.Args, " ")
-	}
-
-	var lines []string
-	lines = append(lines, titleStyle.Render("Dry Run Preview"), "")
-	lines = append(lines, fieldLabelStyle.Render("Name")+script.Name)
-	lines = append(lines, fieldLabelStyle.Render("Command")+cmdStr)
-	lines = append(lines, fieldLabelStyle.Render("Work Dir")+expandPath(script.WorkDir))
-	if len(script.Tags) > 0 {
-		lines = append(lines, fieldLabelStyle.Render("Tags")+strings.Join(script.Tags, ", "))
-	}
-	if len(script.EnvVars) > 0 {
-		var pairs []string
-		for k, v := range script.EnvVars {
-			pairs = append(pairs, k+"="+v)
-		}
-		lines = append(lines, fieldLabelStyle.Render("Env Vars")+strings.Join(pairs, ", "))
-	}
-	if script.Schedule != "" {
-		status := "OFF"
-		if script.ScheduleOn {
-			status = "ON"
-		}
-		lines = append(lines, fieldLabelStyle.Render("Schedule")+
-			fmt.Sprintf("every %s (%s)", script.Schedule, status))
-	}
-	if script.RunCount > 0 {
-		lines = append(lines, fieldLabelStyle.Render("Run Count")+fmt.Sprintf("%d", script.RunCount))
-	}
-	if script.LastRun != "" {
-		lines = append(lines, fieldLabelStyle.Render("Last Run")+script.LastRun)
-	}
-	lines = append(lines, "", dimTextStyle.Render("Press any key to close"))
-
-	dialog := dialogStyle.
-		BorderForeground(colorAccent).
-		Width(60).
-		Render(strings.Join(lines, "\n"))
-
-	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center,
-		dialog)
-}
-
 // --- Parameterized script dialog ---
 
 func (m model) renderParamDialog() string {
@@ -510,15 +676,10 @@ func (m model) renderParamDialog() string {
 		w = m.width - 8
 	}
 
-	cmdStr := m.paramScript.Command
-	if len(m.paramScript.Args) > 0 {
-		cmdStr += " " + strings.Join(m.paramScript.Args, " ")
-	}
-
 	var lines []string
 	lines = append(lines, titleStyle.Render("Parameters"), "")
 	lines = append(lines, dimTextStyle.Render(m.paramScript.Name))
-	lines = append(lines, dimTextStyle.Render(cmdStr), "")
+	lines = append(lines, dimTextStyle.Render(m.paramScript.FullCommand()), "")
 
 	for i, field := range m.paramFields {
 		label := fieldLabelStyle.Render(field)
@@ -578,6 +739,27 @@ func (m model) renderScheduleEditDialog() string {
 		dialog)
 }
 
+// --- File picker overlay ---
+
+func (m model) renderFilePickerOverlay() string {
+	w := m.width - 8
+	if w > 80 {
+		w = 80
+	}
+
+	var lines []string
+	lines = append(lines, titleStyle.Render("Select Directory"), "")
+	lines = append(lines, m.filePicker.View())
+	lines = append(lines, "")
+	lines = append(lines, dimTextStyle.Render(keyStyle.Render("enter")+" select  "+keyStyle.Render("esc")+" cancel"))
+
+	dialog := dialogStyle.Width(w).Render(strings.Join(lines, "\n"))
+
+	return lipgloss.Place(m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		dialog)
+}
+
 // --- Help overlay ---
 
 func (m model) renderHelp() string {
@@ -602,7 +784,12 @@ func (m model) renderHelp() string {
 			{"d", "Delete script"},
 			{"/", "Search / filter"},
 			{"s", "Sort (name/runs/recent)"},
-			{"←/→", "Scroll columns"},
+		}},
+		{"Edit", []helpKey{
+			{"tab/shift+tab", "Next / prev field"},
+			{"enter", "Save"},
+			{"ctrl+f", "Browse directory (work dir)"},
+			{"esc", "Cancel"},
 		}},
 		{"Schedules", []helpKey{
 			{"enter", "Toggle on / off"},
@@ -620,7 +807,7 @@ func (m model) renderHelp() string {
 		}},
 	}
 
-	keyCol := lipgloss.NewStyle().Foreground(colorAccent).Width(14)
+	keyCol := lipgloss.NewStyle().Foreground(colorAccent).Width(16)
 
 	var lines []string
 	lines = append(lines, titleStyle.Render("Help"), "")
@@ -647,10 +834,10 @@ func (m model) renderHelp() string {
 // --- Utility ---
 
 func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
+	if max < 4 {
+		return ""
 	}
-	return s[:max-3] + "..."
+	return xansi.Truncate(s, max, "...")
 }
 
 func formatElapsed(d time.Duration) string {

@@ -19,7 +19,7 @@ import (
 
 var placeholderRe = regexp.MustCompile(`\{\{(\w+)(?:=([^}]*))?\}\}`)
 
-// shellSplit splits a command string into tokens, respecting single and double quotes.
+// shellSplit splits a command string into tokens, respecting quotes.
 func shellSplit(s string) []string {
 	var tokens []string
 	var cur strings.Builder
@@ -49,36 +49,6 @@ func shellSplit(s string) []string {
 		tokens = append(tokens, cur.String())
 	}
 	return tokens
-}
-
-// categoryIcons maps category names (lowercase) to display icons.
-var categoryIcons = map[string]string{
-	"development": "⚙",
-	"dev":         "⚙",
-	"git":         "",
-	"docker":      "🐳",
-	"deploy":      "🚀",
-	"deployment":  "🚀",
-	"database":    "🗄",
-	"db":          "🗄",
-	"monitoring":  "📊",
-	"network":     "🌐",
-	"security":    "🔒",
-	"backup":      "💾",
-	"system":      "🖥",
-	"test":        "🧪",
-	"testing":     "🧪",
-	"build":       "🔨",
-	"ci":          "🔄",
-	"cloud":       "☁",
-	"general":     "📁",
-}
-
-func categoryIcon(name string) string {
-	if icon, ok := categoryIcons[strings.ToLower(name)]; ok {
-		return icon
-	}
-	return "📂"
 }
 
 // --- Config / IO ---
@@ -124,6 +94,62 @@ func expandPath(path string) string {
 	return path
 }
 
+// --- Visible scripts (replaces old table management) ---
+
+func (m *model) updateVisibleScripts() {
+	sorted := m.getSortedScripts()
+	filter := strings.ToLower(m.searchFilter)
+
+	m.visibleScripts = m.visibleScripts[:0]
+
+	for _, script := range sorted {
+		if filter != "" {
+			tagStr := strings.ToLower(strings.Join(script.Tags, " "))
+			match := strings.Contains(strings.ToLower(script.Name), filter) ||
+				strings.Contains(strings.ToLower(script.Category), filter) ||
+				strings.Contains(strings.ToLower(script.Description), filter) ||
+				strings.Contains(strings.ToLower(script.Command), filter) ||
+				strings.Contains(tagStr, filter)
+			if !match {
+				continue
+			}
+		}
+		// Find original index
+		for i := range m.scripts {
+			if m.scripts[i].Name == script.Name &&
+				m.scripts[i].Command == script.Command &&
+				m.scripts[i].Category == script.Category {
+				m.visibleScripts = append(m.visibleScripts, i)
+				break
+			}
+		}
+	}
+
+	// Clamp cursor
+	if m.scriptCursor >= len(m.visibleScripts) {
+		m.scriptCursor = len(m.visibleScripts) - 1
+	}
+	if m.scriptCursor < 0 {
+		m.scriptCursor = 0
+	}
+}
+
+// currentScript returns the currently selected script, or nil.
+func (m *model) currentScript() *ScriptEntry {
+	if m.scriptCursor < 0 || m.scriptCursor >= len(m.visibleScripts) {
+		return nil
+	}
+	return &m.scripts[m.visibleScripts[m.scriptCursor]]
+}
+
+// currentScriptIndex returns the original index of the selected script.
+func (m *model) currentScriptIndex() int {
+	if m.scriptCursor < 0 || m.scriptCursor >= len(m.visibleScripts) {
+		return -1
+	}
+	return m.visibleScripts[m.scriptCursor]
+}
+
 // --- Parameterized scripts ---
 
 type paramField struct {
@@ -144,6 +170,9 @@ func extractPlaceholders(script ScriptEntry) []paramField {
 		}
 	}
 	add(placeholderRe.FindAllStringSubmatch(script.Command, -1))
+	for _, arg := range script.Flags {
+		add(placeholderRe.FindAllStringSubmatch(arg, -1))
+	}
 	for _, arg := range script.Args {
 		add(placeholderRe.FindAllStringSubmatch(arg, -1))
 	}
@@ -165,6 +194,11 @@ func substitutePlaceholders(script ScriptEntry, values map[string]string) Script
 		})
 	}
 	result.Command = replace(result.Command)
+	newFlags := make([]string, len(result.Flags))
+	for i, f := range result.Flags {
+		newFlags[i] = replace(f)
+	}
+	result.Flags = newFlags
 	newArgs := make([]string, len(result.Args))
 	for i, arg := range result.Args {
 		newArgs[i] = expandPath(replace(arg))
@@ -174,7 +208,6 @@ func substitutePlaceholders(script ScriptEntry, values map[string]string) Script
 }
 
 // runScript creates a RunningScript and returns the start command.
-// If foreground is true, switches to the run panel.
 func (m *model) runScript(script ScriptEntry, foreground bool) tea.Cmd {
 	scriptID := m.nextRunID
 	m.nextRunID++
@@ -202,9 +235,10 @@ func startScript(script ScriptEntry, scriptID int) tea.Cmd {
 			defer close(ch)
 			workDir := expandPath(script.WorkDir)
 
+			args := script.FullArgs()
 			var cmd *exec.Cmd
-			if len(script.Args) > 0 {
-				cmd = exec.Command(script.Command, script.Args...)
+			if len(args) > 0 {
+				cmd = exec.Command(script.Command, args...)
 			} else {
 				cmd = exec.Command(script.Command)
 			}
@@ -216,6 +250,9 @@ func startScript(script ScriptEntry, scriptID int) tea.Cmd {
 					cmd.Env = append(cmd.Env, k+"="+v)
 				}
 			}
+
+			// Create stdin pipe
+			stdinPipe, stdinErr := cmd.StdinPipe()
 
 			r, w, err := os.Pipe()
 			if err != nil {
@@ -230,6 +267,12 @@ func startScript(script ScriptEntry, scriptID int) tea.Cmd {
 				r.Close()
 				ch <- outputLine{done: true, err: err}
 				return
+			}
+
+			// Send stdin pipe info via a special first message
+			if stdinErr == nil {
+				// We'll pass stdin through the started message
+				_ = stdinPipe
 			}
 
 			waitCh := make(chan error, 1)
@@ -403,7 +446,6 @@ func (m *model) viewOutputFile() {
 		return
 	}
 
-	// Parse filename for display name
 	parts := strings.Split(strings.TrimSuffix(m.outputFiles[selectedIndex], ".txt"), "_")
 	name := m.outputFiles[selectedIndex]
 	if len(parts) >= 3 {
@@ -422,91 +464,7 @@ func (m *model) viewOutputFile() {
 	m.page = pageRunning
 }
 
-// --- Table management ---
-
-func (m *model) updateTable() {
-	sortedScripts := m.getSortedScripts()
-	visibleColumns := m.table.Columns()
-
-	var rows []table.Row
-	m.scriptIndices = []int{}
-
-	filter := strings.ToLower(m.searchFilter)
-	var lastCategory string
-	scriptIndex := 0
-
-	showCategoryHeaders := m.sortMode == sortByName
-
-	for _, script := range sortedScripts {
-		if filter != "" {
-			tagStr := strings.ToLower(strings.Join(script.Tags, " "))
-			match := strings.Contains(strings.ToLower(script.Name), filter) ||
-				strings.Contains(strings.ToLower(script.Category), filter) ||
-				strings.Contains(strings.ToLower(script.Description), filter) ||
-				strings.Contains(strings.ToLower(script.Command), filter) ||
-				strings.Contains(tagStr, filter)
-			if !match {
-				scriptIndex++
-				continue
-			}
-		}
-
-		if showCategoryHeaders {
-			displayCategory := script.Category
-			if displayCategory == "" {
-				displayCategory = "General"
-			}
-
-			if displayCategory != lastCategory {
-				headerRow := make(table.Row, len(visibleColumns))
-				headerRow[0] = fmt.Sprintf("%s %s", categoryIcon(displayCategory), displayCategory)
-				for i := 1; i < len(headerRow); i++ {
-					headerRow[i] = ""
-				}
-				rows = append(rows, headerRow)
-				m.scriptIndices = append(m.scriptIndices, -1)
-				lastCategory = displayCategory
-			}
-		}
-
-		argsStr := strings.Join(script.Args, " ")
-		fullCommand := fmt.Sprintf("%s %s", script.Command, argsStr)
-
-		// Build display name with tags and schedule indicator
-		displayName := script.Name
-		if len(script.Tags) > 0 {
-			displayName += "  #" + strings.Join(script.Tags, " #")
-		}
-		if script.ScheduleOn && script.Schedule != "" {
-			displayName += "  ⏱" + script.Schedule
-		}
-
-		fullRowData := []string{
-			displayName,
-			fullCommand,
-			fmt.Sprintf("%d", script.RunCount),
-			script.WorkDir,
-			script.Description,
-			script.LastRun,
-		}
-
-		visibleRow := make(table.Row, len(visibleColumns))
-		for i, col := range visibleColumns {
-			columnIndex := m.getColumnIndex(col.Title)
-			if columnIndex >= 0 && columnIndex < len(fullRowData) {
-				visibleRow[i] = fullRowData[columnIndex]
-			} else {
-				visibleRow[i] = ""
-			}
-		}
-
-		rows = append(rows, visibleRow)
-		m.scriptIndices = append(m.scriptIndices, scriptIndex)
-		scriptIndex++
-	}
-	m.table.SetRows(rows)
-	m.skipHeaderRow(1)
-}
+// --- Output/Schedule table management ---
 
 func (m *model) updateOutputTable() {
 	w := m.width - 10
@@ -613,114 +571,48 @@ func (m *model) updateScheduleTable() {
 	m.cronTable.SetHeight(m.height - 8)
 }
 
-func (m *model) getColumnIndex(title string) int {
-	switch title {
-	case "Name":
-		return 0
-	case "Command":
-		return 1
-	case "Runs":
-		return 2
-	case "Work Dir":
-		return 3
-	case "Description":
-		return 4
-	case "Last Run":
-		return 5
-	default:
-		return -1
-	}
-}
-
-// expandableCols lists column titles that should absorb extra horizontal space.
-var expandableCols = map[string]bool{
-	"Name": true, "Command": true, "Work Dir": true, "Description": true,
-}
-
-func (m *model) adjustLayout() {
-	tableHeight := m.height - 8
-	if tableHeight < 3 {
-		tableHeight = 3
-	}
-	availableWidth := m.width - 6
-
-	// Reset to base widths before recomputing
-	baseWidths := map[string]int{
-		"Name": 22, "Command": 40, "Runs": 6,
-		"Work Dir": 30, "Description": 28, "Last Run": 18,
-	}
-	for i := range m.allColumns {
-		if w, ok := baseWidths[m.allColumns[i].Title]; ok {
-			m.allColumns[i].Width = w
-		}
-	}
-
-	// Determine how many columns fit starting from scrollOffset
-	startCol := m.scrollOffset
-	endCol := startCol
-	used := 0
-	for endCol < len(m.allColumns) {
-		w := m.allColumns[endCol].Width
-		if used+w > availableWidth && endCol > startCol {
-			break
-		}
-		used += w
-		endCol++
-	}
-	if endCol == startCol {
-		endCol = startCol + 1
-	}
-	if endCol > len(m.allColumns) {
-		endCol = len(m.allColumns)
-	}
-
-	visibleColumns := make([]table.Column, endCol-startCol)
-	for i := range visibleColumns {
-		visibleColumns[i] = m.allColumns[startCol+i]
-	}
-
-	// Distribute extra width to expandable columns
-	usedWidth := 0
-	for _, col := range visibleColumns {
-		usedWidth += col.Width
-	}
-	extra := availableWidth - usedWidth
-	if extra > 0 {
-		var expandIdx []int
-		for i, col := range visibleColumns {
-			if expandableCols[col.Title] {
-				expandIdx = append(expandIdx, i)
-			}
-		}
-		if len(expandIdx) == 0 {
-			// Fallback: expand last column
-			visibleColumns[len(visibleColumns)-1].Width += extra
-		} else {
-			each := extra / len(expandIdx)
-			rem := extra % len(expandIdx)
-			for _, i := range expandIdx {
-				visibleColumns[i].Width += each
-			}
-			visibleColumns[expandIdx[len(expandIdx)-1]].Width += rem
-		}
-	}
-
-	m.table.SetColumns(visibleColumns)
-	m.table.SetHeight(tableHeight)
-	m.maxCols = len(m.allColumns)
-	m.cronTable.SetHeight(tableHeight)
-	m.outputTable.SetHeight(tableHeight)
-}
-
 // --- Edit helpers ---
 
+type editField struct {
+	label string
+	value string
+}
+
+// editFields returns the fields for the edit form.
+// Field indices: 0=Name, 1=Category, 2=Command, 3=Flags, 4=WorkDir, 5=Desc, 6=Tags, 7=EnvVars
+func (m model) editFields(script ScriptEntry) []editField {
+	tagsStr := strings.Join(script.Tags, ", ")
+	var envPairs []string
+	for k, v := range script.EnvVars {
+		envPairs = append(envPairs, k+"="+v)
+	}
+	envStr := strings.Join(envPairs, ", ")
+
+	cmdWithArgs := script.Command
+	if len(script.Args) > 0 {
+		cmdWithArgs += " " + strings.Join(script.Args, " ")
+	}
+
+	return []editField{
+		{"Name", script.Name},
+		{"Category", script.Category},
+		{"Command", cmdWithArgs},
+		{"Flags", strings.Join(script.Flags, " ")},
+		{"Work Dir", script.WorkDir},
+		{"Description", script.Description},
+		{"Tags", tagsStr},
+		{"Env Vars", envStr},
+	}
+}
+
+const editFieldCount = 8
+
 func (m *model) startEdit() {
-	if len(m.scripts) == 0 {
+	if len(m.visibleScripts) == 0 {
 		return
 	}
 
-	displayIndex := m.table.Cursor()
-	origIdx := m.getOriginalIndexByDisplayIndex(displayIndex)
+	origIdx := m.currentScriptIndex()
 	if origIdx == -1 {
 		return
 	}
@@ -729,12 +621,12 @@ func (m *model) startEdit() {
 	m.editRow = origIdx
 	m.editCol = 0
 
-	w := m.width - 6
+	w := m.width - 34 // right panel width roughly
 	if w > 100 {
 		w = 100
 	}
-	if w < 50 {
-		w = 50
+	if w < 40 {
+		w = 40
 	}
 	m.textInput.Width = w - 16
 	m.loadEditField()
@@ -745,35 +637,14 @@ func (m *model) loadEditField() {
 		return
 	}
 	script := m.scripts[m.editRow]
-	var value string
-	switch m.editCol {
-	case 0:
-		value = script.Name
-	case 1:
-		value = script.Category
-	case 2:
-		if len(script.Args) > 0 {
-			value = script.Command + " " + strings.Join(script.Args, " ")
-		} else {
-			value = script.Command
-		}
-	case 3:
-		value = script.WorkDir
-	case 4:
-		value = script.Description
-	case 5:
-		value = strings.Join(script.Tags, ", ")
-	case 6:
-		var pairs []string
-		for k, v := range script.EnvVars {
-			pairs = append(pairs, k+"="+v)
-		}
-		sort.Strings(pairs)
-		value = strings.Join(pairs, ", ")
+	fields := m.editFields(script)
+
+	if m.editCol >= 0 && m.editCol < len(fields) {
+		value := fields[m.editCol].value
+		m.textInput.SetValue(value)
+		m.textInput.SetCursor(len(value))
+		m.textInput.Focus()
 	}
-	m.textInput.SetValue(value)
-	m.textInput.SetCursor(len(value))
-	m.textInput.Focus()
 }
 
 func (m *model) saveEdit() {
@@ -783,11 +654,11 @@ func (m *model) saveEdit() {
 
 	value := m.textInput.Value()
 	switch m.editCol {
-	case 0:
+	case 0: // Name
 		m.scripts[m.editRow].Name = value
-	case 1:
+	case 1: // Category
 		m.scripts[m.editRow].Category = value
-	case 2:
+	case 2: // Command + Args
 		value = strings.TrimSpace(value)
 		tokens := shellSplit(value)
 		if len(tokens) > 0 {
@@ -797,11 +668,18 @@ func (m *model) saveEdit() {
 			m.scripts[m.editRow].Command = value
 			m.scripts[m.editRow].Args = []string{}
 		}
-	case 3:
-		m.scripts[m.editRow].WorkDir = expandPath(value)
-	case 4:
+	case 3: // Flags
+		value = strings.TrimSpace(value)
+		if value == "" {
+			m.scripts[m.editRow].Flags = nil
+		} else {
+			m.scripts[m.editRow].Flags = shellSplit(value)
+		}
+	case 4: // Work Dir
+		m.scripts[m.editRow].WorkDir = value
+	case 5: // Description
 		m.scripts[m.editRow].Description = value
-	case 5:
+	case 6: // Tags
 		var tags []string
 		for _, t := range strings.Split(value, ",") {
 			t = strings.TrimSpace(t)
@@ -810,7 +688,7 @@ func (m *model) saveEdit() {
 			}
 		}
 		m.scripts[m.editRow].Tags = tags
-	case 6:
+	case 7: // Env Vars
 		envVars := make(map[string]string)
 		for _, pair := range strings.Split(value, ",") {
 			pair = strings.TrimSpace(pair)
@@ -826,7 +704,7 @@ func (m *model) saveEdit() {
 	}
 
 	m.saveScripts()
-	m.updateTable()
+	m.updateVisibleScripts()
 }
 
 func (m *model) cancelEdit() {
@@ -837,7 +715,7 @@ func (m *model) cancelEdit() {
 	m.textInput.SetValue("")
 }
 
-// --- Sorting / Lookup ---
+// --- Sorting ---
 
 func (m *model) getSortedScripts() []ScriptEntry {
 	sorted := make([]ScriptEntry, len(m.scripts))
@@ -875,159 +753,6 @@ func (m *model) getSortedScripts() []ScriptEntry {
 	return sorted
 }
 
-func (m *model) getScriptByDisplayIndex(displayIndex int) *ScriptEntry {
-	if displayIndex < 0 || displayIndex >= len(m.scriptIndices) {
-		return nil
-	}
-	scriptIndex := m.scriptIndices[displayIndex]
-	if scriptIndex == -1 {
-		return nil
-	}
-
-	sortedScripts := m.getSortedScripts()
-	if scriptIndex >= len(sortedScripts) {
-		return nil
-	}
-
-	sortedScript := sortedScripts[scriptIndex]
-	for i := range m.scripts {
-		if m.scripts[i].Name == sortedScript.Name &&
-			m.scripts[i].Command == sortedScript.Command &&
-			m.scripts[i].Category == sortedScript.Category {
-			return &m.scripts[i]
-		}
-	}
-	return nil
-}
-
-func (m *model) findScriptDisplayIndex(targetScript ScriptEntry) int {
-	for i, scriptIndex := range m.scriptIndices {
-		if scriptIndex == -1 {
-			continue
-		}
-		sortedScripts := m.getSortedScripts()
-		if scriptIndex < len(sortedScripts) {
-			script := sortedScripts[scriptIndex]
-			if script.Name == targetScript.Name &&
-				script.Command == targetScript.Command &&
-				script.Category == targetScript.Category {
-				return i
-			}
-		}
-	}
-	return -1
-}
-
-func (m *model) getOriginalIndexByDisplayIndex(displayIndex int) int {
-	if displayIndex < 0 || displayIndex >= len(m.scriptIndices) {
-		return -1
-	}
-	scriptIndex := m.scriptIndices[displayIndex]
-	if scriptIndex == -1 {
-		return -1
-	}
-
-	sortedScripts := m.getSortedScripts()
-	if scriptIndex >= len(sortedScripts) {
-		return -1
-	}
-
-	sortedScript := sortedScripts[scriptIndex]
-	for i := range m.scripts {
-		if m.scripts[i].Name == sortedScript.Name &&
-			m.scripts[i].Command == sortedScript.Command &&
-			m.scripts[i].Category == sortedScript.Category {
-			return i
-		}
-	}
-	return -1
-}
-
-// --- Cursor helpers (skip category headers) ---
-
-func (m *model) moveCursor(dir int) {
-	cursor := m.table.Cursor()
-	total := len(m.scriptIndices)
-	if total == 0 {
-		return
-	}
-
-	cursor += dir
-	for cursor >= 0 && cursor < total && m.scriptIndices[cursor] == -1 {
-		cursor += dir
-	}
-	if cursor < 0 {
-		cursor = 0
-		for cursor < total && m.scriptIndices[cursor] == -1 {
-			cursor++
-		}
-	}
-	if cursor >= total {
-		cursor = total - 1
-		for cursor >= 0 && m.scriptIndices[cursor] == -1 {
-			cursor--
-		}
-	}
-	if cursor >= 0 && cursor < total {
-		m.table.SetCursor(cursor)
-	}
-}
-
-func (m *model) moveCursorTo(target, skipDir int) {
-	total := len(m.scriptIndices)
-	if total == 0 {
-		return
-	}
-	if target < 0 {
-		target = 0
-	}
-	if target >= total {
-		target = total - 1
-	}
-	for target >= 0 && target < total && m.scriptIndices[target] == -1 {
-		target += skipDir
-	}
-	if target >= 0 && target < total {
-		m.table.SetCursor(target)
-	}
-}
-
-func (m *model) moveCursorBy(delta int) {
-	total := len(m.scriptIndices)
-	if total == 0 {
-		return
-	}
-	cursor := m.table.Cursor() + delta
-	if cursor < 0 {
-		cursor = 0
-	}
-	if cursor >= total {
-		cursor = total - 1
-	}
-	dir := 1
-	if delta < 0 {
-		dir = -1
-	}
-	for cursor >= 0 && cursor < total && m.scriptIndices[cursor] == -1 {
-		cursor += dir
-	}
-	if cursor >= 0 && cursor < total {
-		m.table.SetCursor(cursor)
-	}
-}
-
-func (m *model) skipHeaderRow(dir int) {
-	cursor := m.table.Cursor()
-	total := len(m.scriptIndices)
-	if total == 0 || cursor < 0 || cursor >= total {
-		return
-	}
-	if m.scriptIndices[cursor] != -1 {
-		return
-	}
-	m.moveCursor(dir)
-}
-
 // --- Schedule helpers ---
 
 func (m *model) checkSchedules() []tea.Cmd {
@@ -1048,7 +773,6 @@ func (m *model) checkSchedules() []tea.Cmd {
 		if err != nil || dur < time.Minute {
 			continue
 		}
-		// Skip if already running
 		running := false
 		for _, rs := range m.runningScripts {
 			if rs.Name == s.Name && !rs.Done {
@@ -1059,7 +783,6 @@ func (m *model) checkSchedules() []tea.Cmd {
 		if running {
 			continue
 		}
-		// Check if due
 		isDue := false
 		if s.LastRun == "" {
 			isDue = true
@@ -1096,7 +819,7 @@ func humanDuration(d time.Duration) string {
 	return fmt.Sprintf("%dh%dm", h, min)
 }
 
-// --- Table styling ---
+// --- Table styling (for output/cron tables) ---
 
 func styledTable(t table.Model) table.Model {
 	s := table.DefaultStyles()

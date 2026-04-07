@@ -1,9 +1,11 @@
 package main
 
 import (
+	"io"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -32,9 +34,8 @@ const (
 	modeDryRun
 	modeParamPrompt
 	modeScheduleEdit
+	modeFilePicker
 )
-
-// --- Sort ---
 
 const (
 	sortByName     = 0
@@ -47,6 +48,7 @@ const (
 type ScriptEntry struct {
 	Name        string            `json:"name"`
 	Command     string            `json:"command"`
+	Flags       []string          `json:"flags,omitempty"`
 	Args        []string          `json:"args"`
 	WorkDir     string            `json:"workdir"`
 	Category    string            `json:"category"`
@@ -57,6 +59,22 @@ type ScriptEntry struct {
 	EnvVars     map[string]string `json:"env_vars,omitempty"`
 	Schedule    string            `json:"schedule,omitempty"`
 	ScheduleOn  bool              `json:"schedule_on,omitempty"`
+}
+
+// FullArgs returns flags + args combined for execution.
+func (s ScriptEntry) FullArgs() []string {
+	all := make([]string, 0, len(s.Flags)+len(s.Args))
+	all = append(all, s.Flags...)
+	all = append(all, s.Args...)
+	return all
+}
+
+// FullCommand returns the display string for the full command.
+func (s ScriptEntry) FullCommand() string {
+	parts := []string{s.Command}
+	parts = append(parts, s.Flags...)
+	parts = append(parts, s.Args...)
+	return strings.Join(parts, " ")
 }
 
 type ScriptManager struct {
@@ -78,31 +96,47 @@ type RunningScript struct {
 	Err       error
 	Scroll    int
 	StartTime time.Time
+	EndTime   time.Time
 	ch        <-chan outputLine
+	stdin     io.WriteCloser
 }
 
 func (r *RunningScript) Output() string {
 	return strings.Join(r.Lines, "\n")
 }
 
+func (r *RunningScript) Elapsed() time.Duration {
+	if r.Done && !r.EndTime.IsZero() {
+		return r.EndTime.Sub(r.StartTime).Truncate(time.Second)
+	}
+	return time.Since(r.StartTime).Truncate(time.Second)
+}
+
+// leftPanelItem is a row in the scripts left panel.
+type leftPanelItem struct {
+	isHeader bool
+	label    string
+	scriptIdx int // index into visibleScripts (-1 if header)
+}
+
 type model struct {
-	scripts       []ScriptEntry
-	table         table.Model
-	configFile    string
-	width         int
-	height        int
-	statusMsg     string
-	statusExpiry  time.Time
-	scrollOffset  int
-	maxCols       int
-	scriptIndices []int
-	allColumns    []table.Column
+	scripts    []ScriptEntry
+	configFile string
+	width      int
+	height     int
+	statusMsg  string
+	statusExpiry time.Time
 
 	// Navigation
 	page appPage
 	mode appMode
 
-	// Edit
+	// Scripts page — split panel
+	scriptCursor   int   // index into visibleScripts
+	visibleScripts []int // indices into m.scripts, sorted+filtered
+	leftScroll     int
+
+	// Edit (inline in right panel)
 	editRow   int
 	editCol   int
 	textInput textinput.Model
@@ -114,10 +148,11 @@ type model struct {
 	searchInput  textinput.Model
 	searchFilter string
 
-	// Running scripts (concurrent, streaming)
+	// Running scripts
 	runningScripts []RunningScript
 	activeRunTab   int
 	nextRunID      int
+	stdinInput     textinput.Model
 
 	// Output history
 	outputFiles []string
@@ -139,6 +174,9 @@ type model struct {
 	cronTable      table.Model
 	schedEditIndex int
 	lastCronCheck  time.Time
+
+	// File picker
+	filePicker filepicker.Model
 }
 
 // --- Messages ---
@@ -152,6 +190,7 @@ type statusMsg struct {
 type scriptStartedMsg struct {
 	scriptID int
 	ch       <-chan outputLine
+	stdin    io.WriteCloser
 }
 
 type scriptLineMsg struct {

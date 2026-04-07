@@ -26,6 +26,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case scriptStartedMsg:
 		if rs := m.findRunningScript(msg.scriptID); rs != nil {
 			rs.ch = msg.ch
+			rs.stdin = msg.stdin
 			return m, listenForOutput(msg.scriptID, msg.ch)
 		}
 		return m, nil
@@ -49,6 +50,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if rs := m.findRunningScript(msg.scriptID); rs != nil {
 			rs.Done = true
 			rs.Err = msg.err
+			rs.EndTime = time.Now()
+			if rs.stdin != nil {
+				rs.stdin.Close()
+				rs.stdin = nil
+			}
 			for i := range m.scripts {
 				if m.scripts[i].Name == rs.Name {
 					m.scripts[i].LastRun = time.Now().Format("2006-01-02 15:04")
@@ -57,7 +63,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.saveScripts()
-			m.updateTable()
+			m.updateVisibleScripts()
 			m.updateScheduleTable()
 			m.saveOutputToFile(rs.Name, rs.Output(), rs.WorkDir, msg.err)
 			if msg.err != nil {
@@ -72,12 +78,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.adjustLayout()
-		m.updateTable()
+		m.updateVisibleScripts()
 		m.updateScheduleTable()
 		if len(m.outputFiles) > 0 {
 			m.updateOutputTable()
 		}
+		m.cronTable.SetHeight(m.height - 8)
+		m.outputTable.SetHeight(m.height - 8)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -100,6 +107,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSearch(msg)
 		case modeScheduleEdit:
 			return m.updateScheduleEdit(msg)
+		case modeFilePicker:
+			return m.updateFilePicker(msg)
 		}
 
 		// Normal mode — global keys
@@ -137,6 +146,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case pageRunning:
 			return m.updateRunningPage(msg)
 		}
+	}
+
+	// Handle filepicker messages (non-key)
+	if m.mode == modeFilePicker {
+		var cmd tea.Cmd
+		m.filePicker, cmd = m.filePicker.Update(msg)
+
+		if didSelect, path := m.filePicker.DidSelectFile(msg); didSelect {
+			m.mode = modeEdit
+			m.textInput.SetValue(path)
+			return m, nil
+		}
+		if didSelect, path := m.filePicker.DidSelectDisabledFile(msg); didSelect {
+			_ = path
+			return m, cmd
+		}
+
+		return m, cmd
 	}
 
 	return m, nil
@@ -279,7 +306,7 @@ func (m model) updateDeleteConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			scriptName := m.scripts[m.deleteIndex].Name
 			m.scripts = append(m.scripts[:m.deleteIndex], m.scripts[m.deleteIndex+1:]...)
 			m.saveScripts()
-			m.updateTable()
+			m.updateVisibleScripts()
 			m.mode = modeNormal
 			m.deleteIndex = -1
 			return m, showStatus(fmt.Sprintf("Deleted %s", scriptName))
@@ -336,18 +363,53 @@ func (m model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, showStatus("Script saved")
 	case "tab":
 		m.saveEdit()
-		m.editCol = (m.editCol + 1) % 7
+		m.editCol = (m.editCol + 1) % editFieldCount
 		m.loadEditField()
 		return m, nil
 	case "shift+tab":
 		m.saveEdit()
-		m.editCol = (m.editCol - 1 + 7) % 7
+		m.editCol = (m.editCol - 1 + editFieldCount) % editFieldCount
 		m.loadEditField()
 		return m, nil
+	case "ctrl+f":
+		// Open file picker for Work Dir field
+		if m.editCol == 4 {
+			m.saveEdit()
+			m.mode = modeFilePicker
+			homeDir, _ := m.scripts[m.editRow].WorkDir, ""
+			if homeDir != "" {
+				expanded := expandPath(m.scripts[m.editRow].WorkDir)
+				m.filePicker.CurrentDirectory = expanded
+			}
+			return m, m.filePicker.Init()
+		}
 	}
 
 	var cmd tea.Cmd
 	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+// --- File picker ---
+
+func (m model) updateFilePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = modeEdit
+		m.loadEditField()
+		return m, nil
+	}
+
+	// Forward to filepicker
+	var cmd tea.Cmd
+	m.filePicker, cmd = m.filePicker.Update(msg)
+
+	if didSelect, path := m.filePicker.DidSelectFile(msg); didSelect {
+		m.mode = modeEdit
+		m.textInput.SetValue(path)
+		return m, nil
+	}
+
 	return m, cmd
 }
 
@@ -359,19 +421,19 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		m.searchFilter = ""
 		m.searchInput.SetValue("")
-		m.updateTable()
+		m.updateVisibleScripts()
 		return m, nil
 	case "enter":
 		m.mode = modeNormal
 		m.searchFilter = m.searchInput.Value()
-		m.updateTable()
+		m.updateVisibleScripts()
 		return m, nil
 	}
 
 	var cmd tea.Cmd
 	m.searchInput, cmd = m.searchInput.Update(msg)
 	m.searchFilter = m.searchInput.Value()
-	m.updateTable()
+	m.updateVisibleScripts()
 	return m, cmd
 }
 
@@ -428,7 +490,7 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.searchFilter != "" {
 			m.searchFilter = ""
 			m.searchInput.SetValue("")
-			m.updateTable()
+			m.updateVisibleScripts()
 			return m, nil
 		}
 	case "e":
@@ -443,81 +505,79 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.scripts = append(m.scripts, newScript)
 		m.saveScripts()
-		m.updateTable()
-		displayIndex := m.findScriptDisplayIndex(newScript)
-		if displayIndex != -1 {
-			m.table.SetCursor(displayIndex)
-			m.startEdit()
+		m.updateVisibleScripts()
+		// Move cursor to the new script
+		for i, idx := range m.visibleScripts {
+			if m.scripts[idx].Name == newScript.Name &&
+				m.scripts[idx].Command == newScript.Command {
+				m.scriptCursor = i
+				break
+			}
 		}
+		m.startEdit()
 		return m, showStatus("New script — fill in fields, enter to save")
 	case "d", "delete":
-		if len(m.scripts) > 0 {
-			displayIndex := m.table.Cursor()
-			originalIndex := m.getOriginalIndexByDisplayIndex(displayIndex)
-			if originalIndex == -1 {
+		if len(m.visibleScripts) > 0 {
+			origIdx := m.currentScriptIndex()
+			if origIdx == -1 {
 				return m, nil
 			}
 			m.mode = modeDeleteConfirm
-			m.deleteIndex = originalIndex
+			m.deleteIndex = origIdx
 		}
 		return m, nil
 	case " ", "enter":
-		if len(m.scripts) > 0 {
-			displayIndex := m.table.Cursor()
-			script := m.getScriptByDisplayIndex(displayIndex)
-			if script != nil {
-				params := extractPlaceholders(*script)
-				if len(params) > 0 {
-					allHaveDefaults := true
-					for _, p := range params {
-						if p.Default == "" {
-							allHaveDefaults = false
-							break
-						}
+		script := m.currentScript()
+		if script != nil {
+			params := extractPlaceholders(*script)
+			if len(params) > 0 {
+				allHaveDefaults := true
+				for _, p := range params {
+					if p.Default == "" {
+						allHaveDefaults = false
+						break
 					}
-					if allHaveDefaults {
-						values := make(map[string]string)
-						for _, p := range params {
-							values[p.Name] = p.Default
-						}
-						resolved := substitutePlaceholders(*script, values)
-						return m, m.runScript(resolved, true)
-					}
-					m.mode = modeParamPrompt
-					m.paramScript = script
-					m.paramFields = make([]string, len(params))
-					m.paramValues = make([]string, len(params))
-					for i, p := range params {
-						m.paramFields[i] = p.Name
-						m.paramValues[i] = p.Default
-					}
-					m.paramCursor = 0
-					m.textInput.SetValue(m.paramValues[0])
-					m.textInput.Placeholder = m.paramFields[0]
-					m.textInput.SetCursor(len(m.paramValues[0]))
-					m.textInput.Focus()
-					return m, nil
 				}
-				return m, m.runScript(*script, true)
+				if allHaveDefaults {
+					values := make(map[string]string)
+					for _, p := range params {
+						values[p.Name] = p.Default
+					}
+					resolved := substitutePlaceholders(*script, values)
+					return m, m.runScript(resolved, true)
+				}
+				m.mode = modeParamPrompt
+				m.paramScript = script
+				m.paramFields = make([]string, len(params))
+				m.paramValues = make([]string, len(params))
+				for i, p := range params {
+					m.paramFields[i] = p.Name
+					m.paramValues[i] = p.Default
+				}
+				m.paramCursor = 0
+				m.textInput.SetValue(m.paramValues[0])
+				m.textInput.Placeholder = m.paramFields[0]
+				m.textInput.SetCursor(len(m.paramValues[0]))
+				m.textInput.Focus()
+				return m, nil
 			}
+			return m, m.runScript(*script, true)
 		}
 		return m, nil
 	case "D":
-		if len(m.scripts) > 0 {
-			script := m.getScriptByDisplayIndex(m.table.Cursor())
-			if script != nil {
-				m.mode = modeDryRun
-			}
+		script := m.currentScript()
+		if script != nil {
+			m.mode = modeDryRun
 		}
 		return m, nil
 	case "s":
 		m.sortMode = (m.sortMode + 1) % 3
-		m.updateTable()
+		m.updateVisibleScripts()
 		labels := []string{"name", "run count", "last run"}
 		return m, showStatus(fmt.Sprintf("Sort: %s", labels[m.sortMode]))
 	case "r":
 		m.scripts = loadScripts(m.configFile)
-		m.updateTable()
+		m.updateVisibleScripts()
 		return m, showStatus("Refreshed")
 	case "v":
 		m.page = pageHistory
@@ -525,50 +585,81 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateOutputTable()
 		return m, nil
 	case "up", "k":
-		m.moveCursor(-1)
+		if m.scriptCursor > 0 {
+			m.scriptCursor--
+			m.ensureCursorVisible()
+		}
 		return m, nil
 	case "down", "j":
-		m.moveCursor(1)
+		if m.scriptCursor < len(m.visibleScripts)-1 {
+			m.scriptCursor++
+			m.ensureCursorVisible()
+		}
 		return m, nil
 	case "G":
-		m.moveCursorTo(len(m.scriptIndices)-1, -1)
+		m.scriptCursor = len(m.visibleScripts) - 1
+		if m.scriptCursor < 0 {
+			m.scriptCursor = 0
+		}
+		m.ensureCursorVisible()
 		return m, nil
 	case "g":
-		m.moveCursorTo(0, 1)
+		m.scriptCursor = 0
+		m.leftScroll = 0
 		return m, nil
 	case "ctrl+d", "pagedown":
-		pageSize := (m.height - 6) / 2
-		m.moveCursorBy(pageSize)
+		pageSize := (m.height - 10) / 2
+		m.scriptCursor += pageSize
+		if m.scriptCursor >= len(m.visibleScripts) {
+			m.scriptCursor = len(m.visibleScripts) - 1
+		}
+		if m.scriptCursor < 0 {
+			m.scriptCursor = 0
+		}
+		m.ensureCursorVisible()
 		return m, nil
 	case "ctrl+u", "pageup":
-		pageSize := (m.height - 6) / 2
-		m.moveCursorBy(-pageSize)
-		return m, nil
-	case "left":
-		if m.scrollOffset > 0 {
-			m.scrollOffset--
-			m.adjustLayout()
-			m.updateTable()
+		pageSize := (m.height - 10) / 2
+		m.scriptCursor -= pageSize
+		if m.scriptCursor < 0 {
+			m.scriptCursor = 0
 		}
+		m.ensureCursorVisible()
 		return m, nil
-	case "right":
-		maxOffset := m.maxCols - len(m.table.Columns())
-		if maxOffset < 0 {
-			maxOffset = 0
-		}
-		if m.scrollOffset < maxOffset {
-			m.scrollOffset++
-			m.adjustLayout()
-			m.updateTable()
-		}
-		return m, nil
-	default:
-		var cmd tea.Cmd
-		m.table, cmd = m.table.Update(msg)
-		m.skipHeaderRow(1)
-		return m, cmd
 	}
 	return m, nil
+}
+
+// ensureCursorVisible adjusts leftScroll so the cursor is visible.
+func (m *model) ensureCursorVisible() {
+	contentH := m.height - 8
+	if contentH < 5 {
+		contentH = 5
+	}
+
+	// Find position of cursor in the left panel items list
+	items := m.buildLeftPanelItems()
+	cursorItemIdx := -1
+	for i, item := range items {
+		if !item.isHeader && item.scriptIdx == m.scriptCursor {
+			cursorItemIdx = i
+			break
+		}
+	}
+	if cursorItemIdx == -1 {
+		return
+	}
+
+	visibleH := contentH - 2
+	if cursorItemIdx < m.leftScroll {
+		m.leftScroll = cursorItemIdx
+	}
+	if cursorItemIdx >= m.leftScroll+visibleH {
+		m.leftScroll = cursorItemIdx - visibleH + 1
+	}
+	if m.leftScroll < 0 {
+		m.leftScroll = 0
+	}
 }
 
 // --- Schedules page ---
