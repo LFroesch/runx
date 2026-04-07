@@ -3,7 +3,7 @@ package main
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	// Colors — consistent palette (matches portmon/chunes)
+	// Colors — consistent palette
 	colorPrimary = lipgloss.Color("#5AF78E") // green
 	colorAccent  = lipgloss.Color("#57C7FF") // blue
 	colorWarn    = lipgloss.Color("#FF6AC1") // pink
@@ -15,6 +15,15 @@ var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorPrimary)
+
+	// Page tabs
+	activePageStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(colorPrimary).
+			Underline(true)
+
+	inactivePageStyle = lipgloss.NewStyle().
+				Foreground(colorDim)
 
 	// Status bar keys
 	keyStyle = lipgloss.NewStyle().
@@ -45,8 +54,28 @@ var (
 	statusMsgStyle = lipgloss.NewStyle().
 			Foreground(colorAccent)
 
-	// Sections
-	sectionStyle = lipgloss.NewStyle().
+	// Dialog overlay
+	dialogStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorAccent).
+			Padding(1, 2)
+
+	// Tabs for running scripts
+	activeTabStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(colorAccent)
+			Foreground(colorPrimary).
+			Background(lipgloss.Color("#3A3A5C")).
+			Padding(0, 1)
+
+	tabStyle = lipgloss.NewStyle().
+			Foreground(colorDim).
+			Padding(0, 1)
+
+	// Edit form fields
+	fieldLabelStyle = lipgloss.NewStyle().
+			Foreground(colorAccent).
+			Width(14)
+
+	inactiveFieldStyle = lipgloss.NewStyle().
+				Foreground(colorDim)
 )
