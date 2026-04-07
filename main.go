@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -29,6 +30,10 @@ func main() {
 	stdinTi.Placeholder = "stdin input..."
 	stdinTi.CharLimit = 2000
 
+	ea := textarea.New()
+	ea.CharLimit = 0
+	ea.ShowLineNumbers = false
+
 	fp := filepicker.New()
 	fp.CurrentDirectory = homeDir
 	fp.AllowedTypes = []string{} // allow all (directories)
@@ -37,20 +42,22 @@ func main() {
 	fp.FileAllowed = false
 
 	m := model{
-		scripts:     loadScripts(configFile),
-		configFile:  configFile,
-		width:       100,
-		height:      24,
-		page:        pageScripts,
-		mode:        modeNormal,
-		editRow:     -1,
-		editCol:     -1,
-		deleteIndex: -1,
-		textInput:   ti,
-		searchInput: si,
-		stdinInput:  stdinTi,
-		clearDays:   7,
-		filePicker:  fp,
+		scripts:        loadScripts(configFile),
+		configFile:     configFile,
+		width:          100,
+		height:         24,
+		page:           pageScripts,
+		mode:           modeNormal,
+		editRow:        -1,
+		editCol:        -1,
+		deleteIndex:    -1,
+		scriptEditIdx:  -1,
+		textInput:      ti,
+		searchInput:    si,
+		stdinInput:     stdinTi,
+		clearDays:      7,
+		filePicker:     fp,
+		scriptEditArea: ea,
 	}
 
 	outputTable := table.New(

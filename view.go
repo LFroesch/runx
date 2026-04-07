@@ -170,12 +170,15 @@ func (m model) renderFooter() string {
 			add("tab", "next")
 			add("shift+tab", "prev")
 			add("enter", "save")
-			add("ctrl+f", "browse")
+			add("ctrl+o", "browse")
+			add("esc", "cancel")
+		} else if m.mode == modeScriptEdit {
+			add("ctrl+s", "save")
 			add("esc", "cancel")
 		} else {
 			add("enter", "run")
 			add("D", "dry run")
-			add("e", "edit")
+			add("e/E", "edit")
 			add("n", "add")
 			add("d", "delete")
 			add("/", "search")
@@ -198,7 +201,11 @@ func (m model) renderFooter() string {
 
 	add("1-4", "pages")
 	add("?", "help")
-	add("q", "quit")
+	if m.page == pageScripts {
+		add("q", "quit")
+	} else {
+		add("q", "scripts")
+	}
 
 	return " " + strings.Join(parts, "")
 }
@@ -210,7 +217,16 @@ func (m model) renderScriptsPage() string {
 		return m.renderEmptyState("No scripts yet", "Press n to add your first script")
 	}
 
-	contentH := m.height - 6
+	headerH := 1
+	if m.mode == modeSearch {
+		headerH = 2
+	}
+	hasStatus := m.statusMsg != "" && time.Now().Before(m.statusExpiry)
+	fixedH := headerH + 1 + 1 + 1 // header + sep + sep + footer
+	if hasStatus {
+		fixedH++
+	}
+	contentH := m.height - fixedH
 	if contentH < 5 {
 		contentH = 5
 	}
@@ -226,7 +242,7 @@ func (m model) renderScriptsPage() string {
 
 	// Render left panel
 	var leftLines []string
-	visibleH := contentH - 2 // panel border padding
+	visibleH := contentH - 2 // panel inner height (border eats 2)
 
 	// Clamp scroll
 	maxScroll := len(items) - visibleH
@@ -238,28 +254,27 @@ func (m model) renderScriptsPage() string {
 		scroll = maxScroll
 	}
 
-	// Scroll indicator top
+	// Reserve a line for top indicator if needed
 	if scroll > 0 {
-		leftLines = append(leftLines, dimTextStyle.Render(fmt.Sprintf("  ▲ %d more", scroll)))
 		visibleH--
 	}
-
+	// Check if a bottom indicator is needed (before committing endIdx)
 	endIdx := scroll + visibleH
 	if endIdx > len(items) {
 		endIdx = len(items)
 	}
-
-	// Bottom indicator check
-	remaining := len(items) - endIdx
-	if remaining > 0 {
-		visibleH-- // reserve line for bottom indicator
+	needBottom := len(items) > endIdx
+	if needBottom {
+		visibleH--
 		endIdx = scroll + visibleH
-		if scroll > 0 {
-			endIdx++ // we already subtracted one for top indicator
-		}
 		if endIdx > len(items) {
 			endIdx = len(items)
 		}
+	}
+
+	// Top indicator
+	if scroll > 0 {
+		leftLines = append(leftLines, dimTextStyle.Render(fmt.Sprintf("  ▲ %d more", scroll)))
 	}
 
 	for i := scroll; i < endIdx; i++ {
@@ -279,9 +294,9 @@ func (m model) renderScriptsPage() string {
 		}
 	}
 
-	// Scroll indicator bottom
-	remaining = len(items) - endIdx
-	if remaining > 0 {
+	// Bottom indicator
+	if needBottom {
+		remaining := len(items) - endIdx
 		leftLines = append(leftLines, dimTextStyle.Render(fmt.Sprintf("  ▼ %d more", remaining)))
 	}
 
@@ -295,11 +310,14 @@ func (m model) renderScriptsPage() string {
 
 	// Render right panel
 	var rightContent string
-	if m.mode == modeEdit {
+	switch m.mode {
+	case modeEdit:
 		rightContent = m.renderEditPanel(rightW)
-	} else if m.mode == modeDryRun {
+	case modeDryRun:
 		rightContent = m.renderDryRunPanel(rightW)
-	} else {
+	case modeScriptEdit:
+		rightContent = m.renderScriptEditPanel(rightW, contentH-2)
+	default:
 		rightContent = m.renderDetailPanel(rightW)
 	}
 	rightPanel := panelStyle.Width(rightW).Height(contentH - 2).Render(rightContent)
@@ -397,6 +415,18 @@ func (m model) renderDetailPanel(w int) string {
 	return strings.Join(lines, "\n")
 }
 
+// renderScriptEditPanel shows the textarea editor (E key) in the right panel.
+func (m model) renderScriptEditPanel(w, h int) string {
+	label := ""
+	if m.scriptEditFile != "" {
+		label = "  " + dimTextStyle.Render(m.scriptEditFile)
+	}
+	header := warnTextStyle.Render("EDITING") + label + "  " + dimTextStyle.Render("ctrl+s save · esc cancel")
+	m.scriptEditArea.SetWidth(w - 2)
+	m.scriptEditArea.SetHeight(h - 3)
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", m.scriptEditArea.View())
+}
+
 // renderEditPanel shows inline edit form in the right panel.
 func (m model) renderEditPanel(w int) string {
 	if m.editRow < 0 || m.editRow >= len(m.scripts) {
@@ -431,7 +461,7 @@ func (m model) renderEditPanel(w int) string {
 		keyStyle.Render("tab"), keyStyle.Render("shift+tab"),
 		keyStyle.Render("enter"), keyStyle.Render("esc"))
 	if m.editCol == 4 { // Work Dir field
-		hints += "  " + keyStyle.Render("ctrl+f") + " browse"
+		hints += "  " + keyStyle.Render("ctrl+o") + " browse"
 	}
 	lines = append(lines, dimTextStyle.Render(hints))
 
@@ -532,12 +562,18 @@ func (m model) renderRunningPage() string {
 
 	// Content area
 	rs := m.runningScripts[m.activeRunTab]
-	visibleHeight := m.height - 12
+	// tabBar(1) + blank(1) + content(N) + blank(1) + status(1) = N+4, plus outer header(1)+sep(1)+sep(1)+footer(1)=4
+	visibleHeight := m.height - 8
+	if !rs.Done && rs.stdin != nil {
+		visibleHeight-- // stdin line
+	}
 	if visibleHeight < 3 {
 		visibleHeight = 3
 	}
 
 	lines := rs.Lines
+	// Truncate lines to avoid wrapping messing up layout
+	maxLineW := m.width - 2
 	startLine := rs.Scroll
 	endLine := startLine + visibleHeight
 	if endLine > len(lines) {
@@ -550,9 +586,15 @@ func (m model) renderRunningPage() string {
 		}
 	}
 
-	var visibleContent string
+	var visibleLines []string
 	if len(lines) > 0 && startLine < endLine {
-		visibleContent = strings.Join(lines[startLine:endLine], "\n")
+		for _, l := range lines[startLine:endLine] {
+			visibleLines = append(visibleLines, xansi.Truncate(l, maxLineW, ""))
+		}
+	}
+	var visibleContent string
+	if len(visibleLines) > 0 {
+		visibleContent = strings.Join(visibleLines, "\n")
 	}
 	if !rs.Done {
 		if visibleContent != "" {
@@ -562,11 +604,8 @@ func (m model) renderRunningPage() string {
 	}
 
 	contentStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorDim).
-		Padding(0, 1).
 		Height(visibleHeight).
-		Width(m.width - 4)
+		Width(m.width - 2)
 
 	content := contentStyle.Render(visibleContent)
 
@@ -779,7 +818,8 @@ func (m model) renderHelp() string {
 			{"ctrl+d/u", "Page down / up"},
 			{"enter", "Run script"},
 			{"D", "Dry run preview"},
-			{"e", "Edit script"},
+			{"e", "Edit (field form)"},
+			{"E", "Edit (textarea)"},
 			{"n/a", "New script"},
 			{"d", "Delete script"},
 			{"/", "Search / filter"},
@@ -788,7 +828,7 @@ func (m model) renderHelp() string {
 		{"Edit", []helpKey{
 			{"tab/shift+tab", "Next / prev field"},
 			{"enter", "Save"},
-			{"ctrl+f", "Browse directory (work dir)"},
+			{"ctrl+o", "Browse directory (work dir)"},
 			{"esc", "Cancel"},
 		}},
 		{"Schedules", []helpKey{

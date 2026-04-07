@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -27,6 +28,7 @@ type appMode int
 const (
 	modeNormal appMode = iota
 	modeEdit
+	modeScriptEdit // textarea-based edit (E key)
 	modeDeleteConfirm
 	modeHelp
 	modeSearch
@@ -177,6 +179,11 @@ type model struct {
 
 	// File picker
 	filePicker filepicker.Model
+
+	// Script textarea editor (E key)
+	scriptEditArea textarea.Model
+	scriptEditIdx  int    // index into m.scripts being edited
+	scriptEditFile string // path of the file being edited
 }
 
 // --- Messages ---
@@ -202,6 +209,8 @@ type scriptFinishedMsg struct {
 	scriptID int
 	err      error
 }
+
+type editorDoneMsg struct{}
 
 func showStatus(msg string) tea.Cmd {
 	return func() tea.Msg {

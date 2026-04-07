@@ -83,6 +83,20 @@ func (m *model) saveScripts() {
 	os.WriteFile(m.configFile, data, 0644)
 }
 
+
+// findScriptFile looks through a script's command+args for a real file on disk.
+func findScriptFile(s ScriptEntry) string {
+	candidates := append([]string{s.Command}, s.Flags...)
+	candidates = append(candidates, s.Args...)
+	for _, c := range candidates {
+		expanded := expandPath(c)
+		if info, err := os.Stat(expanded); err == nil && !info.IsDir() {
+			return expanded
+		}
+	}
+	return ""
+}
+
 func expandPath(path string) string {
 	if strings.HasPrefix(path, "~/") {
 		homeDir, err := os.UserHomeDir()

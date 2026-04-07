@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -34,7 +35,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case scriptLineMsg:
 		if rs := m.findRunningScript(msg.scriptID); rs != nil {
 			rs.Lines = append(rs.Lines, msg.line)
-			visH := m.height - 8
+			visH := m.height - 8 // matches renderRunningPage visibleHeight
 			maxScroll := len(rs.Lines) - visH
 			if maxScroll < 0 {
 				maxScroll = 0
@@ -75,6 +76,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case editorDoneMsg:
+		m.scripts = loadScripts(m.configFile)
+		m.updateVisibleScripts()
+		m.updateScheduleTable()
+		return m, showStatus("Scripts reloaded")
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -99,6 +106,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateHelp(msg)
 		case modeEdit:
 			return m.updateEdit(msg)
+		case modeScriptEdit:
+			return m.updateScriptEdit(msg)
 		case modeDeleteConfirm:
 			return m.updateDeleteConfirm(msg)
 		case modeClear:
@@ -113,8 +122,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Normal mode — global keys
 		switch msg.String() {
-		case "q", "ctrl+c":
+		case "ctrl+c":
 			return m, tea.Quit
+		case "q":
+			if m.page == pageScripts {
+				return m, tea.Quit
+			}
+			m.page = pageScripts
+			return m, nil
 		case "?":
 			m.mode = modeHelp
 			return m, nil
@@ -148,21 +163,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Route non-key messages to textarea when in script edit mode
+	if m.mode == modeScriptEdit {
+		var cmd tea.Cmd
+		m.scriptEditArea, cmd = m.scriptEditArea.Update(msg)
+		return m, cmd
+	}
+
 	// Handle filepicker messages (non-key)
 	if m.mode == modeFilePicker {
 		var cmd tea.Cmd
 		m.filePicker, cmd = m.filePicker.Update(msg)
-
-		if didSelect, path := m.filePicker.DidSelectFile(msg); didSelect {
+		if m.filePicker.Path != "" {
+			path := m.filePicker.Path
+			m.filePicker.Path = ""
 			m.mode = modeEdit
 			m.textInput.SetValue(path)
 			return m, nil
 		}
-		if didSelect, path := m.filePicker.DidSelectDisabledFile(msg); didSelect {
-			_ = path
-			return m, cmd
-		}
-
 		return m, cmd
 	}
 
@@ -262,7 +280,7 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			rs.Scroll--
 		}
 	case "down", "j":
-		maxScroll := len(rs.Lines) - (m.height - 12)
+		maxScroll := len(rs.Lines) - (m.height - 8)
 		if maxScroll < 0 {
 			maxScroll = 0
 		}
@@ -270,7 +288,7 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			rs.Scroll++
 		}
 	case "G":
-		maxScroll := len(rs.Lines) - (m.height - 12)
+		maxScroll := len(rs.Lines) - (m.height - 8)
 		if maxScroll < 0 {
 			maxScroll = 0
 		}
@@ -278,8 +296,8 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "g":
 		rs.Scroll = 0
 	case "ctrl+d", "pagedown":
-		pageSize := (m.height - 12) / 2
-		maxScroll := len(rs.Lines) - (m.height - 12)
+		pageSize := (m.height - 8) / 2
+		maxScroll := len(rs.Lines) - (m.height - 8)
 		if maxScroll < 0 {
 			maxScroll = 0
 		}
@@ -288,7 +306,7 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			rs.Scroll = maxScroll
 		}
 	case "ctrl+u", "pageup":
-		pageSize := (m.height - 12) / 2
+		pageSize := (m.height - 8) / 2
 		rs.Scroll -= pageSize
 		if rs.Scroll < 0 {
 			rs.Scroll = 0
@@ -371,15 +389,14 @@ func (m model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editCol = (m.editCol - 1 + editFieldCount) % editFieldCount
 		m.loadEditField()
 		return m, nil
-	case "ctrl+f":
+	case "ctrl+f", "ctrl+o":
 		// Open file picker for Work Dir field
 		if m.editCol == 4 {
 			m.saveEdit()
 			m.mode = modeFilePicker
-			homeDir, _ := m.scripts[m.editRow].WorkDir, ""
-			if homeDir != "" {
-				expanded := expandPath(m.scripts[m.editRow].WorkDir)
-				m.filePicker.CurrentDirectory = expanded
+			m.filePicker.Path = "" // clear any stale selection
+			if m.scripts[m.editRow].WorkDir != "" {
+				m.filePicker.CurrentDirectory = expandPath(m.scripts[m.editRow].WorkDir)
 			}
 			return m, m.filePicker.Init()
 		}
@@ -387,6 +404,31 @@ func (m model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+// --- Script textarea editor (E key) ---
+
+func (m model) updateScriptEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = modeNormal
+		m.scriptEditArea.Blur()
+		return m, nil
+	case "ctrl+s":
+		if m.scriptEditFile != "" {
+			err := os.WriteFile(m.scriptEditFile, []byte(m.scriptEditArea.Value()), 0644)
+			if err != nil {
+				return m, showStatus(fmt.Sprintf("Save failed: %v", err))
+			}
+		}
+		m.mode = modeNormal
+		m.scriptEditArea.Blur()
+		return m, showStatus("Script saved")
+	}
+
+	var cmd tea.Cmd
+	m.scriptEditArea, cmd = m.scriptEditArea.Update(msg)
 	return m, cmd
 }
 
@@ -400,16 +442,15 @@ func (m model) updateFilePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Forward to filepicker
 	var cmd tea.Cmd
 	m.filePicker, cmd = m.filePicker.Update(msg)
-
-	if didSelect, path := m.filePicker.DidSelectFile(msg); didSelect {
+	if m.filePicker.Path != "" {
+		path := m.filePicker.Path
+		m.filePicker.Path = ""
 		m.mode = modeEdit
 		m.textInput.SetValue(path)
 		return m, nil
 	}
-
 	return m, cmd
 }
 
@@ -496,6 +537,31 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "e":
 		m.startEdit()
 		return m, nil
+	case "E":
+		script := m.currentScript()
+		if script != nil {
+			origIdx := m.currentScriptIndex()
+			filePath := findScriptFile(*script)
+			if filePath == "" {
+				return m, showStatus("No script file found in command")
+			}
+			content, err := os.ReadFile(filePath)
+			if err != nil {
+				return m, showStatus(fmt.Sprintf("Cannot read file: %v", err))
+			}
+			m.scriptEditIdx = origIdx
+			m.scriptEditFile = filePath
+			m.scriptEditArea.SetValue(string(content))
+			rightW := m.width - 28 - 5
+			if m.width < 80 {
+				rightW = m.width - (m.width/3) - 5
+			}
+			m.scriptEditArea.SetWidth(rightW - 2)
+			m.scriptEditArea.SetHeight(m.height - 8)
+			m.scriptEditArea.Focus()
+			m.mode = modeScriptEdit
+			return m, m.scriptEditArea.Cursor.BlinkCmd()
+		}
 	case "n", "a":
 		newScript := ScriptEntry{
 			Name:    "New Script",

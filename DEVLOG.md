@@ -1,4 +1,12 @@
 ## DevLog
+
+### 2026-04-06: UI fixes — height calc, q nav, E key, running page, ctrl+o
+
+- **Scripts page height**: dynamic contentH using mode + status visibility — panels now fill available space
+- **q nav**: `q` on non-scripts page goes to scripts; `q` on scripts page quits
+- **E key**: opens `~/SECOND_BRAIN/sb` via `tea.ExecProcess`
+- **Running page**: removed rounded border bubble (was causing line-wrap UI corruption), truncate long lines with `xansi.Truncate`; corrected scroll height constant to `m.height - 8`
+- **ctrl+o**: alternative to `ctrl+f` for file picker on Work Dir field (ctrl+f intercepted by Cursor terminal)
 ### 2026-03-24: Running page (was overlay)
 - Converted run panel from `modeRunPanel` overlay to dedicated `pageRunning` (key `4`)
 - Removed `o` shortcut and `modeRunPanel` mode enum value
