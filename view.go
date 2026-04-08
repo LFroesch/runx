@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 func (m model) View() string {
@@ -186,6 +186,14 @@ func (m model) renderFooter() string {
 		add("enter", "view")
 		add("c", "clear")
 	case pageRunning:
+		if len(m.runningScripts) > 0 {
+			rs := m.runningScripts[m.activeRunTab]
+			if !rs.Done && rs.stdinVisible {
+				add("enter", "submit")
+				add("esc", "cancel")
+				break
+			}
+		}
 		add("j/k", "scroll")
 		add("G/g", "end/top")
 		if len(m.runningScripts) > 1 {
@@ -585,10 +593,10 @@ func (m model) renderRunningPage() string {
 
 	// Content area
 	rs := m.runningScripts[m.activeRunTab]
-	// tabBar(1) + blank(1) + content(N) + blank(1) + status(1) + stdin(1) = N+5
+	// tabBar(1) + blank(1) + content(N) + blank(1) + status(1) + sep(1) + input(1) = N+6
 	// plus outer header(1)+sep(1)+sep(1)+footer(1)=4 → total m.height
-	// stdin line always reserved to avoid layout jump
-	visibleHeight := m.height - 9
+	// sep+input always reserved to avoid layout jump when prompt appears
+	visibleHeight := m.height - 10
 	if visibleHeight < 3 {
 		visibleHeight = 3
 	}
@@ -646,13 +654,7 @@ func (m model) renderRunningPage() string {
 
 	lineInfo := dimTextStyle.Render(fmt.Sprintf("  %d lines", len(rs.Lines)))
 
-	// Stdin line — always rendered to avoid layout jump; shows input only when active
-	var stdinLine string
-	if !rs.Done && rs.stdinVisible {
-		stdinLine = warnTextStyle.Render("  password> ") + m.stdinInput.View()
-	}
-
-	parts := []string{tabBar, "", content, "", statusInfo + lineInfo, stdinLine}
+	parts := []string{tabBar, "", content, "", statusInfo + lineInfo}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 

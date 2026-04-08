@@ -44,12 +44,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if rs.Scroll >= maxScroll-1 {
 				rs.Scroll = maxScroll
 			}
-			// Detect password/passphrase prompts and show masked input
-			lower := strings.ToLower(msg.line)
-			if rs.stdin != nil && (strings.Contains(lower, "password") || strings.Contains(lower, "passphrase")) {
-				rs.stdinVisible = true
-				m.stdinInput.EchoMode = textinput.EchoPassword
-				m.stdinInput.Focus()
+			// Detect interactive prompts and show stdin input
+			if rs.stdin != nil && !rs.stdinVisible {
+				lower := strings.ToLower(msg.line)
+				if strings.Contains(lower, "password") || strings.Contains(lower, "passphrase") {
+					rs.stdinVisible = true
+					rs.stdinPrompt = "password"
+					m.stdinInput.EchoMode = textinput.EchoPassword
+					m.stdinInput.Width = m.width - 30
+					m.stdinInput.Focus()
+				} else if isConfirmPrompt(msg.line) {
+					rs.stdinVisible = true
+					rs.stdinPrompt = "confirm"
+					m.stdinInput.EchoMode = textinput.EchoNormal
+					m.stdinInput.Width = m.width - 30
+					m.stdinInput.Focus()
+				}
 			}
 			return m, listenForOutput(msg.scriptID, rs.ch)
 		}
@@ -312,6 +322,15 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, showStatus("Copy failed: no clipboard tool found")
 		}
 		return m, showStatus(fmt.Sprintf("Copied %d lines", len(rs.Lines)))
+	case "esc":
+		if !rs.Done && rs.stdin != nil && rs.stdinVisible {
+			rs.stdin.Write([]byte("\n")) //nolint:errcheck
+			m.stdinInput.SetValue("")
+			m.stdinInput.EchoMode = textinput.EchoNormal
+			rs.stdinVisible = false
+			rs.stdinPrompt = ""
+			return m, nil
+		}
 	case "enter":
 		if !rs.Done && rs.stdin != nil && rs.stdinVisible {
 			text := m.stdinInput.Value() + "\n"
@@ -319,6 +338,7 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.stdinInput.SetValue("")
 			m.stdinInput.EchoMode = textinput.EchoNormal
 			rs.stdinVisible = false
+			rs.stdinPrompt = ""
 			return m, nil
 		}
 	}

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -296,16 +296,76 @@ func startScript(script ScriptEntry, scriptID int) tea.Cmd {
 				w.Close()
 			}()
 
-			scanner := bufio.NewScanner(r)
-			buf := make([]byte, 0, 64*1024)
-			scanner.Buffer(buf, 1024*1024)
-			for scanner.Scan() {
-				ch <- outputLine{text: scanner.Text()}
-			}
-			r.Close()
+			// Read in a separate goroutine so we can use select+timer below.
+			readCh := make(chan []byte, 32)
+			go func() {
+				tmp := make([]byte, 4096)
+				for {
+					n, err := r.Read(tmp)
+					if n > 0 {
+						data := make([]byte, n)
+						copy(data, tmp[:n])
+						readCh <- data
+					}
+					if err != nil {
+						close(readCh)
+						return
+					}
+				}
+			}()
 
-			cmdErr := <-waitCh
-			ch <- outputLine{done: true, err: cmdErr}
+			var pending []byte
+			// flushTimer fires when no new data arrives for 100ms — emits any
+			// unterminated line (e.g. "read -rp" prompts that have no trailing \n).
+			flushTimer := time.NewTimer(100 * time.Millisecond)
+			defer flushTimer.Stop()
+
+			emitLines := func(flushPartial bool) {
+				for {
+					idx := bytes.IndexByte(pending, '\n')
+					if idx == -1 {
+						break
+					}
+					line := strings.TrimRight(string(pending[:idx]), "\r")
+					pending = pending[idx+1:]
+					ch <- outputLine{text: line}
+				}
+				if flushPartial && len(pending) > 0 {
+					line := strings.TrimRight(string(pending), "\r")
+					if line != "" {
+						ch <- outputLine{text: line}
+					}
+					pending = nil
+				}
+			}
+
+			resetTimer := func() {
+				if !flushTimer.Stop() {
+					select {
+					case <-flushTimer.C:
+					default:
+					}
+				}
+				flushTimer.Reset(100 * time.Millisecond)
+			}
+
+			for {
+				select {
+				case data, ok := <-readCh:
+					if !ok {
+						emitLines(true)
+						r.Close()
+						cmdErr := <-waitCh
+						ch <- outputLine{done: true, err: cmdErr}
+						return
+					}
+					resetTimer()
+					pending = append(pending, data...)
+					emitLines(false)
+				case <-flushTimer.C:
+					emitLines(true)
+				}
+			}
 		}()
 
 		var stdin io.WriteCloser
@@ -359,6 +419,15 @@ func listenForOutput(scriptID int, ch <-chan outputLine) tea.Cmd {
 		}
 		return scriptLineMsg{scriptID: scriptID, line: line.text}
 	}
+}
+
+// isConfirmPrompt returns true for lines like "Continue? [y/N]" or "Proceed? [Y/n]"
+func isConfirmPrompt(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(line))
+	return strings.Contains(lower, "[y/n]") ||
+		strings.Contains(lower, "[yes/no]") ||
+		strings.Contains(lower, "(y/n)") ||
+		strings.Contains(lower, "(yes/no)")
 }
 
 func (m *model) findRunningScript(id int) *RunningScript {

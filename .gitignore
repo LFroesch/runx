@@ -37,3 +37,9 @@ Thumbs.db
 .vscode/
 .idea/
 *.iml
+
+.claude/
+CLAUDE.md
+WORK.md
+agent_spec.md
+script_ideas.md

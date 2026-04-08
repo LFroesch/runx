@@ -99,7 +99,8 @@ type RunningScript struct {
 	EndTime      time.Time
 	ch           <-chan outputLine
 	stdin        io.WriteCloser
-	stdinVisible bool // set true when password/passphrase prompt detected
+	stdinVisible bool   // set true when interactive prompt detected
+	stdinPrompt  string // "password" or "confirm"
 }
 
 func (r *RunningScript) Output() string {
