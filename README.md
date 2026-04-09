@@ -4,6 +4,8 @@ TUI script runner and manager. Register commands once, organize by category, run
 
 ## Quick Install
 
+Supported platforms: Linux and macOS. On Windows, use WSL.
+
 Recommended (installs to `~/.local/bin`):
 
 ```bash
