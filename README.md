@@ -31,11 +31,6 @@ Command:
 ```bash
 runx
 ```
-## Usage
-
-```bash
-runx
-```
 
 ### Quick Start
 
@@ -123,7 +118,7 @@ runx
 ## Script UX Notes (v1)
 
 - `runx` handles standard prompt-driven scripts well (`read -rp`, password prompts, `[y/N]` confirms).
-- Full-screen terminal UIs (`fzf`, `vim`, `less`, `top`, etc.) may need a normal terminal for best interaction.
+- Full-screen terminal UIs (`fzf`, `vim`, `less`, `top`, etc.) need a normal terminal, not runx at this point in time.
 - If unresolved placeholders remain after prompting, `runx` will block execution and show which keys are missing.
 
 ## Best Script Patterns
