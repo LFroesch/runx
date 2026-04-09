@@ -30,6 +30,13 @@ func (m model) View() string {
 	if m.mode == modeScheduleEdit {
 		return m.renderScheduleEditDialog()
 	}
+	// Stdin prompt overlay — shown over running page when script needs input
+	if m.page == pageRunning && len(m.runningScripts) > 0 {
+		rs := m.runningScripts[m.activeRunTab]
+		if !rs.Done && rs.stdinVisible {
+			return m.renderStdinDialog(rs)
+		}
+	}
 	// --- Main page view ---
 	header := m.renderHeader()
 	sep := dimTextStyle.Render(strings.Repeat("─", m.width))
@@ -186,14 +193,6 @@ func (m model) renderFooter() string {
 		add("enter", "view")
 		add("c", "clear")
 	case pageRunning:
-		if len(m.runningScripts) > 0 {
-			rs := m.runningScripts[m.activeRunTab]
-			if !rs.Done && rs.stdinVisible {
-				add("enter", "submit")
-				add("esc", "cancel")
-				break
-			}
-		}
 		add("j/k", "scroll")
 		add("G/g", "end/top")
 		if len(m.runningScripts) > 1 {
@@ -593,10 +592,10 @@ func (m model) renderRunningPage() string {
 
 	// Content area
 	rs := m.runningScripts[m.activeRunTab]
-	// tabBar(1) + blank(1) + content(N) + blank(1) + status(1) + sep(1) + input(1) = N+6
-	// plus outer header(1)+sep(1)+sep(1)+footer(1)=4 → total m.height
-	// sep+input always reserved to avoid layout jump when prompt appears
-	visibleHeight := m.height - 10
+	// tabBar(1) + blank(1) + content(N) + blank(1) + status(1) = N+4
+	// outer: header(1)+sep(1)+[N+4]+[statusLine up to 1]+sep(1)+footer(1) = N+8/9
+	// use N=m.height-9 so layout is stable regardless of status
+	visibleHeight := m.height - 9
 	if visibleHeight < 3 {
 		visibleHeight = 3
 	}
@@ -619,6 +618,8 @@ func (m model) renderRunningPage() string {
 	var visibleLines []string
 	if len(lines) > 0 && startLine < endLine {
 		for _, l := range lines[startLine:endLine] {
+			// strip carriage returns so they don't corrupt line display
+			l = strings.ReplaceAll(l, "\r", "")
 			visibleLines = append(visibleLines, xansi.Truncate(l, maxLineW, ""))
 		}
 	}
@@ -626,16 +627,10 @@ func (m model) renderRunningPage() string {
 	if len(visibleLines) > 0 {
 		visibleContent = strings.Join(visibleLines, "\n")
 	}
-	if !rs.Done {
-		if visibleContent != "" {
-			visibleContent += "\n"
-		}
-		visibleContent += dimTextStyle.Render("running...")
-	}
 
 	contentStyle := lipgloss.NewStyle().
 		Height(visibleHeight).
-		Width(m.width - 2)
+		MaxHeight(visibleHeight)
 
 	content := contentStyle.Render(visibleContent)
 
@@ -758,6 +753,7 @@ func (m model) renderParamDialog() string {
 
 	var lines []string
 	lines = append(lines, titleStyle.Render("Run: ")+dimTextStyle.Render(m.paramScript.Name), "")
+	lines = append(lines, dimTextStyle.Render(fmt.Sprintf("Field %d/%d", m.paramCursor+1, len(m.paramFields))), "")
 
 	for i, field := range m.paramFields {
 		desc := ""
@@ -779,8 +775,8 @@ func (m model) renderParamDialog() string {
 	}
 
 	lines = append(lines, "")
-	hints := fmt.Sprintf("%s next  %s run  %s cancel",
-		keyStyle.Render("tab"), keyStyle.Render("enter"), keyStyle.Render("esc"))
+	hints := fmt.Sprintf("%s next  %s prev  %s next/run  %s cancel",
+		keyStyle.Render("tab"), keyStyle.Render("shift+tab"), keyStyle.Render("enter"), keyStyle.Render("esc"))
 	lines = append(lines, dimTextStyle.Render(hints))
 
 	dialog := dialogStyle.Width(w).Render(strings.Join(lines, "\n"))
@@ -821,6 +817,47 @@ func (m model) renderScheduleEditDialog() string {
 		dialog)
 }
 
+// --- Stdin prompt overlay ---
+
+func (m model) renderStdinDialog(rs RunningScript) string {
+	w := 56
+	if m.width-8 < w {
+		w = m.width - 8
+	}
+
+	prompt := "Input"
+	if rs.stdinPrompt == "password" {
+		prompt = "Password"
+	} else if rs.stdinPrompt == "confirm" {
+		prompt = "Confirm"
+	}
+
+	var lines []string
+	lines = append(lines, warnTextStyle.Render("Script requires input"), "")
+	lines = append(lines, dimTextStyle.Render(rs.Name), "")
+	if rs.stdinLabel != "" {
+		lines = append(lines, dimTextStyle.Render(truncate(rs.stdinLabel, w-8)), "")
+	}
+	lines = append(lines, fieldLabelStyle.Render(prompt)+m.stdinInput.View())
+	lines = append(lines, "")
+	if rs.stdinPrompt == "confirm" {
+		lines = append(lines, dimTextStyle.Render(
+			keyStyle.Render("y/n")+" quick reply  "+keyStyle.Render("enter")+" submit  "+keyStyle.Render("esc")+" cancel"))
+	} else {
+		lines = append(lines, dimTextStyle.Render(
+			keyStyle.Render("enter")+" submit  "+keyStyle.Render("esc")+" cancel"))
+	}
+
+	dialog := dialogStyle.
+		BorderForeground(colorWarn).
+		Width(w).
+		Render(strings.Join(lines, "\n"))
+
+	return lipgloss.Place(m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		dialog)
+}
+
 // --- Help overlay ---
 
 func (m model) renderHelp() string {
@@ -852,6 +889,7 @@ func (m model) renderHelp() string {
 			{"{{name}}", "Prompt for value before run"},
 			{"{{name=default}}", "Prompt with pre-filled default"},
 			{"{{name:Desc=default}}", "Prompt with description label"},
+			{"{{ name }}", "Spaces inside braces are allowed"},
 		}},
 		{"Edit", []helpKey{
 			{"tab/shift+tab", "Next / prev field"},
@@ -870,6 +908,7 @@ func (m model) renderHelp() string {
 			{"j/k", "Scroll"},
 			{"G/g", "End / top"},
 			{"tab", "Switch tabs"},
+			{"y/n", "Quick confirm reply when prompted"},
 			{"x", "Close tab"},
 		}},
 	}

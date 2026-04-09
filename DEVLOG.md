@@ -1,5 +1,11 @@
 ## DevLog
 
+### 2026-04-07: Running page fixes
+
+- **Stdin input now visible**: stdin input was handled in update but never rendered — added always-visible sep+input line at bottom; shows labeled prompt when active (`password`/`confirm [y/n]`/`input`), dim "stdin ready" otherwise to avoid layout jump
+- **Bottom line fix**: `update.go` scroll calcs used `m.height - 9` but view renders `m.height - 10` lines — last output line was always off-screen; unified to `m.height - 10`
+- **Status line overflow**: running page `visibleHeight` now shrinks by 1 when global status message is active
+
 ### 2026-04-07: Fixes + {{}} improvements
 
 - **ctrl+c fix**: moved global quit check before mode dispatch — ctrl+c now always quits, even when editing/searching/in dialogs

@@ -46,17 +46,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Detect interactive prompts and show stdin input
 			if rs.stdin != nil && !rs.stdinVisible {
-				lower := strings.ToLower(msg.line)
-				if strings.Contains(lower, "password") || strings.Contains(lower, "passphrase") {
+				if promptType, label, ok := detectStdinPrompt(msg.line); ok {
 					rs.stdinVisible = true
-					rs.stdinPrompt = "password"
-					m.stdinInput.EchoMode = textinput.EchoPassword
-					m.stdinInput.Width = m.width - 30
-					m.stdinInput.Focus()
-				} else if isConfirmPrompt(msg.line) {
-					rs.stdinVisible = true
-					rs.stdinPrompt = "confirm"
-					m.stdinInput.EchoMode = textinput.EchoNormal
+					rs.stdinPrompt = promptType
+					rs.stdinLabel = label
+					if promptType == "password" {
+						m.stdinInput.EchoMode = textinput.EchoPassword
+					} else {
+						m.stdinInput.EchoMode = textinput.EchoNormal
+					}
 					m.stdinInput.Width = m.width - 30
 					m.stdinInput.Focus()
 				}
@@ -108,8 +106,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.outputFiles) > 0 {
 			m.updateOutputTable()
 		}
-		m.cronTable.SetHeight(m.height - 8)
-		m.outputTable.SetHeight(m.height - 8)
+		m.cronTable.SetHeight(m.height - 9)
+		m.outputTable.SetHeight(m.height - 9)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -214,13 +212,21 @@ func (m model) updateParamMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, showStatus("Cancelled")
 	case "enter":
 		m.paramValues[m.paramCursor] = m.textInput.Value()
+		if m.paramCursor < len(m.paramFields)-1 {
+			m.paramCursor++
+			m.textInput.SetValue(m.paramValues[m.paramCursor])
+			m.textInput.Placeholder = m.paramFields[m.paramCursor]
+			m.textInput.SetCursor(len(m.paramValues[m.paramCursor]))
+			return m, nil
+		}
 		values := make(map[string]string)
 		for i, field := range m.paramFields {
-			if m.paramValues[i] != "" {
-				values[field] = m.paramValues[i]
-			}
+			values[field] = m.paramValues[i]
 		}
 		resolved := substitutePlaceholders(*m.paramScript, values)
+		if unresolved := unresolvedPlaceholders(resolved); len(unresolved) > 0 {
+			return m, showStatus(fmt.Sprintf("Unresolved placeholders: %s", strings.Join(unresolved, ", ")))
+		}
 		m.mode = modeNormal
 		m.paramScript = nil
 		m.textInput.Blur()
@@ -317,18 +323,32 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if rs.Scroll < 0 {
 			rs.Scroll = 0
 		}
-	case "y":
+	case "y", "Y":
+		if !rs.Done && rs.stdin != nil && rs.stdinVisible && rs.stdinPrompt == "confirm" {
+			rs.stdin.Write([]byte("y\n")) //nolint:errcheck
+			m.stdinInput.SetValue("")
+			m.stdinInput.EchoMode = textinput.EchoNormal
+			rs.stdinVisible = false
+			rs.stdinPrompt = ""
+			rs.stdinLabel = ""
+			return m, nil
+		}
 		if err := copyToClipboard(rs.Output()); err != nil {
 			return m, showStatus("Copy failed: no clipboard tool found")
 		}
 		return m, showStatus(fmt.Sprintf("Copied %d lines", len(rs.Lines)))
 	case "esc":
 		if !rs.Done && rs.stdin != nil && rs.stdinVisible {
-			rs.stdin.Write([]byte("\n")) //nolint:errcheck
+			cancelInput := "\n"
+			if rs.stdinPrompt == "confirm" {
+				cancelInput = "n\n"
+			}
+			rs.stdin.Write([]byte(cancelInput)) //nolint:errcheck
 			m.stdinInput.SetValue("")
 			m.stdinInput.EchoMode = textinput.EchoNormal
 			rs.stdinVisible = false
 			rs.stdinPrompt = ""
+			rs.stdinLabel = ""
 			return m, nil
 		}
 	case "enter":
@@ -339,6 +359,17 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.stdinInput.EchoMode = textinput.EchoNormal
 			rs.stdinVisible = false
 			rs.stdinPrompt = ""
+			rs.stdinLabel = ""
+			return m, nil
+		}
+	case "n", "N":
+		if !rs.Done && rs.stdin != nil && rs.stdinVisible && rs.stdinPrompt == "confirm" {
+			rs.stdin.Write([]byte("n\n")) //nolint:errcheck
+			m.stdinInput.SetValue("")
+			m.stdinInput.EchoMode = textinput.EchoNormal
+			rs.stdinVisible = false
+			rs.stdinPrompt = ""
+			rs.stdinLabel = ""
 			return m, nil
 		}
 	}
@@ -584,10 +615,10 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.scriptEditArea.SetValue(string(content))
 			rightW := m.width - 28 - 5
 			if m.width < 80 {
-				rightW = m.width - (m.width/3) - 5
+				rightW = m.width - (m.width / 3) - 5
 			}
 			m.scriptEditArea.SetWidth(rightW - 2)
-			m.scriptEditArea.SetHeight(m.height - 8)
+			m.scriptEditArea.SetHeight(m.height - 9)
 			m.scriptEditArea.Focus()
 			m.mode = modeScriptEdit
 			return m, m.scriptEditArea.Cursor.BlinkCmd()
@@ -645,6 +676,9 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.textInput.Focus()
 				return m, nil
 			}
+			if unresolved := unresolvedPlaceholders(*script); len(unresolved) > 0 {
+				return m, showStatus(fmt.Sprintf("Unresolved placeholders: %s", strings.Join(unresolved, ", ")))
+			}
 			return m, m.runScript(*script, true)
 		}
 		return m, nil
@@ -694,7 +728,7 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.leftScroll = 0
 		return m, nil
 	case "ctrl+d", "pagedown":
-		pageSize := (m.height - 10) / 2
+		pageSize := (m.height - 9) / 2
 		m.scriptCursor += pageSize
 		if m.scriptCursor >= len(m.visibleScripts) {
 			m.scriptCursor = len(m.visibleScripts) - 1
@@ -705,7 +739,7 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ensureCursorVisible()
 		return m, nil
 	case "ctrl+u", "pageup":
-		pageSize := (m.height - 10) / 2
+		pageSize := (m.height - 9) / 2
 		m.scriptCursor -= pageSize
 		if m.scriptCursor < 0 {
 			m.scriptCursor = 0
@@ -718,7 +752,7 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // ensureCursorVisible adjusts leftScroll so the cursor is visible.
 func (m *model) ensureCursorVisible() {
-	contentH := m.height - 8
+	contentH := m.height - 9
 	if contentH < 5 {
 		contentH = 5
 	}

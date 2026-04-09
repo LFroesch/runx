@@ -19,7 +19,9 @@ import (
 )
 
 // Placeholder syntax: {{name}}, {{name=default}}, {{name:Description=default}}
-var placeholderRe = regexp.MustCompile(`\{\{(\w+)(?::([^=}]*))?(?:=([^}]*))?\}\}`)
+// Supports optional inner whitespace and names like "foo.bar" or "open-job".
+var placeholderRe = regexp.MustCompile(`\{\{\s*([A-Za-z0-9][A-Za-z0-9_.-]*)(?:\s*:\s*([^=}]*?))?(?:\s*=\s*([^}]*?))?\s*\}\}`)
+var ttyInteractiveRe = regexp.MustCompile(`(?i)\b(fzf|gum|whiptail|dialog|vim|nvim|less|more|top|htop|watch|tmux)\b`)
 
 // shellSplit splits a command string into tokens, respecting quotes.
 func shellSplit(s string) []string {
@@ -71,8 +73,20 @@ func loadScripts(configFile string) []ScriptEntry {
 			},
 		}
 	}
-	json.Unmarshal(data, &manager)
-	return manager.Scripts
+	if err := json.Unmarshal(data, &manager); err == nil {
+		return manager.Scripts
+	}
+	backupFile := configFile + ".bak"
+	backupData, backupErr := os.ReadFile(backupFile)
+	if backupErr == nil {
+		var backupManager ScriptManager
+		if json.Unmarshal(backupData, &backupManager) == nil {
+			fmt.Fprintf(os.Stderr, "runx: config parse failed, recovered from backup: %s\n", backupFile)
+			return backupManager.Scripts
+		}
+	}
+	fmt.Fprintf(os.Stderr, "runx: config parse failed and no valid backup found: %s\n", configFile)
+	return []ScriptEntry{}
 }
 
 func (m *model) saveScripts() {
@@ -82,9 +96,11 @@ func (m *model) saveScripts() {
 		return
 	}
 	os.MkdirAll(filepath.Dir(m.configFile), 0755)
+	if existing, readErr := os.ReadFile(m.configFile); readErr == nil {
+		_ = os.WriteFile(m.configFile+".bak", existing, 0644)
+	}
 	os.WriteFile(m.configFile, data, 0644)
 }
-
 
 // findScriptFile looks through a script's command+args for a real file on disk.
 func findScriptFile(s ScriptEntry) string {
@@ -174,26 +190,71 @@ type paramField struct {
 	Default string
 }
 
+func normalizePlaceholderParts(name, desc, def string) (string, string, string) {
+	return strings.TrimSpace(name), strings.TrimSpace(desc), strings.TrimSpace(def)
+}
+
 func extractPlaceholders(script ScriptEntry) []paramField {
-	seen := map[string]bool{}
+	seen := map[string]int{}
 	var fields []paramField
 
 	add := func(matches [][]string) {
 		for _, match := range matches {
-			if !seen[match[1]] {
-				seen[match[1]] = true
-				fields = append(fields, paramField{Name: match[1], Desc: match[2], Default: match[3]})
+			name, desc, def := normalizePlaceholderParts(match[1], match[2], match[3])
+			if idx, ok := seen[name]; ok {
+				// Merge repeated placeholder metadata so later declarations can
+				// fill missing description/default from earlier ones.
+				if fields[idx].Desc == "" && desc != "" {
+					fields[idx].Desc = desc
+				}
+				if fields[idx].Default == "" && def != "" {
+					fields[idx].Default = def
+				}
+				continue
 			}
+			seen[name] = len(fields)
+			fields = append(fields, paramField{Name: name, Desc: desc, Default: def})
 		}
 	}
 	add(placeholderRe.FindAllStringSubmatch(script.Command, -1))
+	add(placeholderRe.FindAllStringSubmatch(script.WorkDir, -1))
 	for _, arg := range script.Flags {
 		add(placeholderRe.FindAllStringSubmatch(arg, -1))
 	}
 	for _, arg := range script.Args {
 		add(placeholderRe.FindAllStringSubmatch(arg, -1))
 	}
+	for _, v := range script.EnvVars {
+		add(placeholderRe.FindAllStringSubmatch(v, -1))
+	}
 	return fields
+}
+
+func unresolvedPlaceholders(script ScriptEntry) []string {
+	seen := map[string]bool{}
+	var unresolved []string
+	addMatches := func(s string) {
+		for _, match := range placeholderRe.FindAllStringSubmatch(s, -1) {
+			name, _, _ := normalizePlaceholderParts(match[1], "", "")
+			if name != "" && !seen[name] {
+				seen[name] = true
+				unresolved = append(unresolved, name)
+			}
+		}
+	}
+	addMatches(script.Command)
+	addMatches(script.WorkDir)
+	for _, f := range script.Flags {
+		addMatches(f)
+	}
+	for _, a := range script.Args {
+		addMatches(a)
+	}
+	for _, v := range script.EnvVars {
+		addMatches(v)
+	}
+	sort.Strings(unresolved)
+	return unresolved
 }
 
 func substitutePlaceholders(script ScriptEntry, values map[string]string) ScriptEntry {
@@ -201,11 +262,12 @@ func substitutePlaceholders(script ScriptEntry, values map[string]string) Script
 	replace := func(s string) string {
 		return placeholderRe.ReplaceAllStringFunc(s, func(match string) string {
 			sub := placeholderRe.FindStringSubmatch(match)
-			if v, ok := values[sub[1]]; ok {
+			name, _, def := normalizePlaceholderParts(sub[1], "", sub[3])
+			if v, ok := values[name]; ok {
 				return v
 			}
-			if sub[3] != "" { // default value (group 3)
-				return sub[3]
+			if def != "" {
+				return def
 			}
 			return match
 		})
@@ -221,6 +283,14 @@ func substitutePlaceholders(script ScriptEntry, values map[string]string) Script
 		newArgs[i] = expandPath(replace(arg))
 	}
 	result.Args = newArgs
+	result.WorkDir = expandPath(replace(result.WorkDir))
+	if len(result.EnvVars) > 0 {
+		newEnv := make(map[string]string, len(result.EnvVars))
+		for k, v := range result.EnvVars {
+			newEnv[k] = replace(v)
+		}
+		result.EnvVars = newEnv
+	}
 	return result
 }
 
@@ -228,11 +298,16 @@ func substitutePlaceholders(script ScriptEntry, values map[string]string) Script
 func (m *model) runScript(script ScriptEntry, foreground bool) tea.Cmd {
 	scriptID := m.nextRunID
 	m.nextRunID++
+	ttyWarning := ttyInteractiveWarning(script)
+	lines := []string{}
+	if ttyWarning != "" {
+		lines = append(lines, ttyWarning)
+	}
 	m.runningScripts = append(m.runningScripts, RunningScript{
 		ID:        scriptID,
 		Name:      script.Name,
 		WorkDir:   script.WorkDir,
-		Lines:     []string{},
+		Lines:     lines,
 		StartTime: time.Now(),
 	})
 	if foreground {
@@ -244,9 +319,52 @@ func (m *model) runScript(script ScriptEntry, foreground bool) tea.Cmd {
 
 // --- Script execution (streaming) ---
 
+func ttyInteractiveWarning(script ScriptEntry) string {
+	full := script.FullCommand()
+	if ttyInteractiveRe.MatchString(full) {
+		return "⚠ Script may require a full TTY UI; if interaction looks broken, run it in a normal terminal."
+	}
+	return ""
+}
+
+func preflightScript(script ScriptEntry) error {
+	workDir := expandPath(script.WorkDir)
+	if workDir != "" {
+		info, err := os.Stat(workDir)
+		if err != nil {
+			return fmt.Errorf("invalid working directory %q: %w", workDir, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("working directory is not a directory: %q", workDir)
+		}
+	}
+	if strings.Contains(script.Command, "/") {
+		cmdPath := expandPath(script.Command)
+		info, err := os.Stat(cmdPath)
+		if err != nil {
+			return fmt.Errorf("command not found: %q", cmdPath)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("command path is a directory: %q", cmdPath)
+		}
+		return nil
+	}
+	if _, err := exec.LookPath(script.Command); err != nil {
+		return fmt.Errorf("command not found in PATH: %q", script.Command)
+	}
+	return nil
+}
+
 func startScript(script ScriptEntry, scriptID int) tea.Cmd {
 	return func() tea.Msg {
 		ch := make(chan outputLine, 100)
+		if err := preflightScript(script); err != nil {
+			go func() {
+				ch <- outputLine{done: true, err: err}
+				close(ch)
+			}()
+			return scriptStartedMsg{scriptID: scriptID, ch: ch}
+		}
 		workDir := expandPath(script.WorkDir)
 
 		args := script.FullArgs()
@@ -421,13 +539,37 @@ func listenForOutput(scriptID int, ch <-chan outputLine) tea.Cmd {
 	}
 }
 
-// isConfirmPrompt returns true for lines like "Continue? [y/N]" or "Proceed? [Y/n]"
-func isConfirmPrompt(line string) bool {
-	lower := strings.ToLower(strings.TrimSpace(line))
-	return strings.Contains(lower, "[y/n]") ||
-		strings.Contains(lower, "[yes/no]") ||
-		strings.Contains(lower, "(y/n)") ||
-		strings.Contains(lower, "(yes/no)")
+var confirmPromptRe = regexp.MustCompile(`(?i)(\[\s*y(?:es)?\s*/\s*n(?:o)?\s*\]|\(\s*y(?:es)?\s*/\s*n(?:o)?\s*\))`)
+
+// detectStdinPrompt returns prompt kind ("password", "confirm", "input") and
+// a cleaned prompt label from output lines.
+func detectStdinPrompt(line string) (string, string, bool) {
+	clean := strings.TrimSpace(strings.TrimRight(line, "\r"))
+	if clean == "" {
+		return "", "", false
+	}
+	lower := strings.ToLower(clean)
+	hasPromptKeyword := strings.Contains(lower, "enter ") ||
+		strings.Contains(lower, "input") ||
+		strings.Contains(lower, "type ") ||
+		strings.Contains(lower, "provide ") ||
+		strings.Contains(lower, "select ") ||
+		strings.Contains(lower, "choice") ||
+		strings.Contains(lower, "value") ||
+		strings.Contains(lower, "token")
+	switch {
+	case strings.Contains(lower, "password"), strings.Contains(lower, "passphrase"):
+		return "password", clean, true
+	case confirmPromptRe.MatchString(lower):
+		return "confirm", clean, true
+	case strings.HasSuffix(clean, "?"):
+		// Best-effort generic prompt detection for progressive scripts.
+		return "input", clean, true
+	case strings.HasSuffix(clean, ":") && hasPromptKeyword:
+		return "input", clean, true
+	default:
+		return "", "", false
+	}
 }
 
 func (m *model) findRunningScript(id int) *RunningScript {

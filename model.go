@@ -100,7 +100,8 @@ type RunningScript struct {
 	ch           <-chan outputLine
 	stdin        io.WriteCloser
 	stdinVisible bool   // set true when interactive prompt detected
-	stdinPrompt  string // "password" or "confirm"
+	stdinPrompt  string // "password", "confirm", or "input"
+	stdinLabel   string // best-effort prompt text from script output
 }
 
 func (r *RunningScript) Output() string {
@@ -116,17 +117,17 @@ func (r *RunningScript) Elapsed() time.Duration {
 
 // leftPanelItem is a row in the scripts left panel.
 type leftPanelItem struct {
-	isHeader bool
-	label    string
+	isHeader  bool
+	label     string
 	scriptIdx int // index into visibleScripts (-1 if header)
 }
 
 type model struct {
-	scripts    []ScriptEntry
-	configFile string
-	width      int
-	height     int
-	statusMsg  string
+	scripts      []ScriptEntry
+	configFile   string
+	width        int
+	height       int
+	statusMsg    string
 	statusExpiry time.Time
 
 	// Navigation
