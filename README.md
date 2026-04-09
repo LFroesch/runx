@@ -31,18 +31,6 @@ Command:
 ```bash
 runx
 ```
-## Install
-
-```bash
-go install github.com/LFroesch/runx@latest
-```
-
-Or build from source:
-
-```bash
-make install
-```
-
 ## Usage
 
 ```bash
