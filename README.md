@@ -115,6 +115,10 @@ runx
 | `~/.config/runx/runx-scripts.json.bak` | Auto-backup of previous config state |
 | `~/.local/share/runx/` | Output history (timestamped files) |
 
+## Editor
+
+Script editing uses `$VISUAL` → `$EDITOR` → nvim → vim → nano → vi (first found).
+
 ## Script UX Notes (v1)
 
 - `runx` handles standard prompt-driven scripts well (`read -rp`, password prompts, `[y/N]` confirms).

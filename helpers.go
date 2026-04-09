@@ -494,16 +494,27 @@ func startScript(script ScriptEntry, scriptID int) tea.Cmd {
 	}
 }
 
-// copyToClipboard writes text to the system clipboard, trying multiple tools.
-// openInEditor opens the given file in $EDITOR (fallback: nano).
+// openInEditor opens the given file in $VISUAL/$EDITOR, or probes for an available editor.
 func openInEditor(path string) tea.Cmd {
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "nano"
+	// Check env vars first
+	for _, env := range []string{"VISUAL", "EDITOR"} {
+		if e := os.Getenv(env); e != "" {
+			if _, err := exec.LookPath(e); err == nil {
+				return tea.ExecProcess(exec.Command(e, path), func(err error) tea.Msg {
+					return editorDoneMsg{}
+				})
+			}
+		}
 	}
-	return tea.ExecProcess(exec.Command(editor, path), func(err error) tea.Msg {
-		return editorDoneMsg{}
-	})
+	// Fallback: probe
+	for _, e := range []string{"nvim", "vim", "nano", "vi"} {
+		if _, err := exec.LookPath(e); err == nil {
+			return tea.ExecProcess(exec.Command(e, path), func(err error) tea.Msg {
+				return editorDoneMsg{}
+			})
+		}
+	}
+	return nil
 }
 
 func copyToClipboard(text string) error {
