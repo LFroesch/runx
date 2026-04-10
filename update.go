@@ -201,6 +201,31 @@ func (m model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // --- Parameterized script prompt ---
 
+// paramIsEnum returns true if the field at idx is an enum picker.
+func (m model) paramIsEnum(idx int) bool {
+	return idx < len(m.paramOptions) && len(m.paramOptions[idx]) > 0
+}
+
+// paramFocusField sets up textInput (or blurs it) when moving to field idx.
+func (m *model) paramFocusField(idx int) {
+	if m.paramIsEnum(idx) {
+		m.textInput.Blur()
+		m.textInput.SetValue("")
+		return
+	}
+	m.textInput.SetValue(m.paramValues[idx])
+	m.textInput.Placeholder = m.paramFields[idx]
+	m.textInput.SetCursor(len(m.paramValues[idx]))
+	m.textInput.Focus()
+}
+
+// paramSaveCurrentField saves the textInput value for text fields (enum fields self-update).
+func (m *model) paramSaveCurrentField() {
+	if !m.paramIsEnum(m.paramCursor) {
+		m.paramValues[m.paramCursor] = m.textInput.Value()
+	}
+}
+
 func (m model) updateParamMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -210,13 +235,30 @@ func (m model) updateParamMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.textInput.SetValue("")
 		m.textInput.Placeholder = ""
 		return m, showStatus("Cancelled")
+
+	case "up", "ctrl+p":
+		if m.paramIsEnum(m.paramCursor) {
+			opts := m.paramOptions[m.paramCursor]
+			n := len(opts)
+			m.paramOptionCursors[m.paramCursor] = (m.paramOptionCursors[m.paramCursor] - 1 + n) % n
+			m.paramValues[m.paramCursor] = opts[m.paramOptionCursors[m.paramCursor]]
+			return m, nil
+		}
+
+	case "down", "ctrl+n":
+		if m.paramIsEnum(m.paramCursor) {
+			opts := m.paramOptions[m.paramCursor]
+			n := len(opts)
+			m.paramOptionCursors[m.paramCursor] = (m.paramOptionCursors[m.paramCursor] + 1) % n
+			m.paramValues[m.paramCursor] = opts[m.paramOptionCursors[m.paramCursor]]
+			return m, nil
+		}
+
 	case "enter":
-		m.paramValues[m.paramCursor] = m.textInput.Value()
+		m.paramSaveCurrentField()
 		if m.paramCursor < len(m.paramFields)-1 {
 			m.paramCursor++
-			m.textInput.SetValue(m.paramValues[m.paramCursor])
-			m.textInput.Placeholder = m.paramFields[m.paramCursor]
-			m.textInput.SetCursor(len(m.paramValues[m.paramCursor]))
+			m.paramFocusField(m.paramCursor)
 			return m, nil
 		}
 		values := make(map[string]string)
@@ -233,25 +275,26 @@ func (m model) updateParamMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.textInput.SetValue("")
 		m.textInput.Placeholder = ""
 		return m, m.runScript(resolved, true)
+
 	case "tab":
-		m.paramValues[m.paramCursor] = m.textInput.Value()
+		m.paramSaveCurrentField()
 		m.paramCursor = (m.paramCursor + 1) % len(m.paramFields)
-		m.textInput.SetValue(m.paramValues[m.paramCursor])
-		m.textInput.Placeholder = m.paramFields[m.paramCursor]
-		m.textInput.SetCursor(len(m.paramValues[m.paramCursor]))
+		m.paramFocusField(m.paramCursor)
 		return m, nil
+
 	case "shift+tab":
-		m.paramValues[m.paramCursor] = m.textInput.Value()
+		m.paramSaveCurrentField()
 		m.paramCursor = (m.paramCursor - 1 + len(m.paramFields)) % len(m.paramFields)
-		m.textInput.SetValue(m.paramValues[m.paramCursor])
-		m.textInput.Placeholder = m.paramFields[m.paramCursor]
-		m.textInput.SetCursor(len(m.paramValues[m.paramCursor]))
+		m.paramFocusField(m.paramCursor)
 		return m, nil
 	}
 
-	var cmd tea.Cmd
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
+	if !m.paramIsEnum(m.paramCursor) {
+		var cmd tea.Cmd
+		m.textInput, cmd = m.textInput.Update(msg)
+		return m, cmd
+	}
+	return m, nil
 }
 
 // --- Running page ---
@@ -664,16 +707,28 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.paramFields = make([]string, len(params))
 				m.paramDescs = make([]string, len(params))
 				m.paramValues = make([]string, len(params))
+				m.paramOptions = make([][]string, len(params))
+				m.paramOptionCursors = make([]int, len(params))
 				for i, p := range params {
 					m.paramFields[i] = p.Name
 					m.paramDescs[i] = p.Desc
-					m.paramValues[i] = p.Default
+					m.paramOptions[i] = p.Options
+					if len(p.Options) > 0 {
+						defIdx := 0
+						for j, opt := range p.Options {
+							if opt == p.Default {
+								defIdx = j
+								break
+							}
+						}
+						m.paramOptionCursors[i] = defIdx
+						m.paramValues[i] = p.Options[defIdx]
+					} else {
+						m.paramValues[i] = p.Default
+					}
 				}
 				m.paramCursor = 0
-				m.textInput.SetValue(m.paramValues[0])
-				m.textInput.Placeholder = m.paramFields[0]
-				m.textInput.SetCursor(len(m.paramValues[0]))
-				m.textInput.Focus()
+				m.paramFocusField(0)
 				return m, nil
 			}
 			if unresolved := unresolvedPlaceholders(*script); len(unresolved) > 0 {

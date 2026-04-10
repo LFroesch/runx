@@ -186,8 +186,9 @@ func (m *model) currentScriptIndex() int {
 
 type paramField struct {
 	Name    string
-	Desc    string // optional: from {{name:Description=default}}
+	Desc    string   // optional: from {{name:Description=default}}
 	Default string
+	Options []string // non-nil when desc is "opt1|opt2|opt3" (enum picker)
 }
 
 func normalizePlaceholderParts(name, desc, def string) (string, string, string) {
@@ -201,6 +202,12 @@ func extractPlaceholders(script ScriptEntry) []paramField {
 	add := func(matches [][]string) {
 		for _, match := range matches {
 			name, desc, def := normalizePlaceholderParts(match[1], match[2], match[3])
+			// If desc contains "|", treat as enum options list
+			var opts []string
+			if strings.Contains(desc, "|") {
+				opts = strings.Split(desc, "|")
+				desc = ""
+			}
 			if idx, ok := seen[name]; ok {
 				// Merge repeated placeholder metadata so later declarations can
 				// fill missing description/default from earlier ones.
@@ -210,10 +217,13 @@ func extractPlaceholders(script ScriptEntry) []paramField {
 				if fields[idx].Default == "" && def != "" {
 					fields[idx].Default = def
 				}
+				if fields[idx].Options == nil && opts != nil {
+					fields[idx].Options = opts
+				}
 				continue
 			}
 			seen[name] = len(fields)
-			fields = append(fields, paramField{Name: name, Desc: desc, Default: def})
+			fields = append(fields, paramField{Name: name, Desc: desc, Default: def, Options: opts})
 		}
 	}
 	add(placeholderRe.FindAllStringSubmatch(script.Command, -1))

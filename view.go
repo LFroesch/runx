@@ -761,7 +761,33 @@ func (m model) renderParamDialog() string {
 			desc = "  " + dimTextStyle.Render(m.paramDescs[i])
 		}
 		label := fieldLabelStyle.Render(field)
-		if i == m.paramCursor {
+		isEnum := i < len(m.paramOptions) && len(m.paramOptions[i]) > 0
+		isActive := i == m.paramCursor
+
+		if isEnum {
+			if isActive {
+				lines = append(lines, label+desc)
+				for j, opt := range m.paramOptions[i] {
+					display := opt
+					if display == "" {
+						display = dimTextStyle.Render("(none)")
+					}
+					if j == m.paramOptionCursors[i] {
+						lines = append(lines, "  "+titleStyle.Render("▸ ")+selectedItemStyle.Render(display))
+					} else {
+						lines = append(lines, "  "+dimTextStyle.Render("  "+display))
+					}
+				}
+			} else {
+				val := m.paramValues[i]
+				if val == "" {
+					val = dimTextStyle.Render("(none)")
+				} else {
+					val = inactiveFieldStyle.Render(val)
+				}
+				lines = append(lines, label+val+desc)
+			}
+		} else if isActive {
 			lines = append(lines, label+m.textInput.View()+desc)
 		} else {
 			val := m.paramValues[i]
@@ -775,8 +801,15 @@ func (m model) renderParamDialog() string {
 	}
 
 	lines = append(lines, "")
-	hints := fmt.Sprintf("%s next  %s prev  %s next/run  %s cancel",
-		keyStyle.Render("tab"), keyStyle.Render("shift+tab"), keyStyle.Render("enter"), keyStyle.Render("esc"))
+	isEnum := m.paramCursor < len(m.paramOptions) && len(m.paramOptions[m.paramCursor]) > 0
+	var hints string
+	if isEnum {
+		hints = fmt.Sprintf("%s/%s pick  %s next/run  %s prev  %s cancel",
+			keyStyle.Render("↑"), keyStyle.Render("↓"), keyStyle.Render("enter"), keyStyle.Render("shift+tab"), keyStyle.Render("esc"))
+	} else {
+		hints = fmt.Sprintf("%s next  %s prev  %s next/run  %s cancel",
+			keyStyle.Render("tab"), keyStyle.Render("shift+tab"), keyStyle.Render("enter"), keyStyle.Render("esc"))
+	}
 	lines = append(lines, dimTextStyle.Render(hints))
 
 	dialog := dialogStyle.Width(w).Render(strings.Join(lines, "\n"))

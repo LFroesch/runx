@@ -170,11 +170,13 @@ type model struct {
 	sortMode int
 
 	// Parameterized script prompt
-	paramScript *ScriptEntry
-	paramFields []string
-	paramDescs  []string // description per field (from {{name:Desc=default}})
-	paramValues []string
-	paramCursor int
+	paramScript        *ScriptEntry
+	paramFields        []string
+	paramDescs         []string   // description per field (from {{name:Desc=default}})
+	paramValues        []string
+	paramOptions       [][]string // non-nil slice means enum picker (from {{name:opt1|opt2=default}})
+	paramOptionCursors []int      // selected index per enum field
+	paramCursor        int
 
 	// Schedule
 	cronTable      table.Model
