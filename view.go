@@ -171,12 +171,14 @@ func (m model) renderFooter() string {
 	case pageScripts:
 		if m.mode == modeEdit {
 			add("tab", "next")
-			add("shift+tab", "prev")
 			add("enter", "save")
 			add("esc", "cancel")
+			add("ctrl+d", "del line")
 		} else if m.mode == modeScriptEdit {
 			add("ctrl+s", "save")
 			add("esc", "cancel")
+			add("ctrl+d", "del line")
+			add("ctrl+home/end", "top/bottom")
 		} else {
 			add("enter", "run")
 			add("D", "dry run")
@@ -199,6 +201,9 @@ func (m model) renderFooter() string {
 			add("tab", "switch")
 		}
 		add("y", "copy")
+		if m.activeRunTab < len(m.runningScripts) && m.runningScripts[m.activeRunTab].Done {
+			add("r", "rerun")
+		}
 		add("x", "close tab")
 	}
 
@@ -540,7 +545,7 @@ func (m model) renderDryRunPanel(w int) string {
 	if script.LastRun != "" {
 		addField("Last Run", script.LastRun)
 	}
-	lines = append(lines, "", dimTextStyle.Render("Press any key to close"))
+	lines = append(lines, "", dimTextStyle.Render("enter/space to run · any other key to close"))
 
 	return strings.Join(lines, "\n")
 }
@@ -875,7 +880,7 @@ func (m model) renderStdinDialog(rs RunningScript) string {
 	lines = append(lines, "")
 	if rs.stdinPrompt == "confirm" {
 		lines = append(lines, dimTextStyle.Render(
-			keyStyle.Render("y/n")+" quick reply  "+keyStyle.Render("enter")+" submit  "+keyStyle.Render("esc")+" cancel"))
+			keyStyle.Render("y/n")+" → yes/no  "+keyStyle.Render("enter")+" submit  "+keyStyle.Render("esc")+" cancel"))
 	} else {
 		lines = append(lines, dimTextStyle.Render(
 			keyStyle.Render("enter")+" submit  "+keyStyle.Render("esc")+" cancel"))

@@ -118,6 +118,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle modal modes first
 		switch m.mode {
 		case modeDryRun:
+			if msg.String() == "enter" || msg.String() == " " {
+				m.mode = modeNormal
+				script := m.currentScript()
+				if script != nil {
+					return m, m.runScript(*script, true)
+				}
+				return m, nil
+			}
 			m.mode = modeNormal
 			return m, nil
 		case modeParamPrompt:
@@ -136,6 +144,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSearch(msg)
 		case modeScheduleEdit:
 			return m.updateScheduleEdit(msg)
+		}
+
+		// If stdin overlay is active, swallow all keys except ctrl+c (handled above) and
+		// route them to the running page handler — prevents 1/2/3/4 from switching pages.
+		if m.page == pageRunning && len(m.runningScripts) > 0 {
+			if rs := &m.runningScripts[m.activeRunTab]; !rs.Done && rs.stdin != nil && rs.stdinVisible {
+				return m.updateRunningPage(msg)
+			}
 		}
 
 		// Normal mode — global keys
@@ -306,6 +322,63 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	rs := &m.runningScripts[m.activeRunTab]
 
+	// Stdin overlay active — intercept all keys before normal page handling.
+	// Prevents 1-4/tab/r/x/y/etc. from firing while user is typing input.
+	if !rs.Done && rs.stdin != nil && rs.stdinVisible {
+		switch msg.String() {
+		case "esc":
+			cancelInput := "\n"
+			if rs.stdinPrompt == "confirm" {
+				cancelInput = "no\n"
+			}
+			rs.stdin.Write([]byte(cancelInput)) //nolint:errcheck
+			m.stdinInput.SetValue("")
+			m.stdinInput.EchoMode = textinput.EchoNormal
+			rs.stdinVisible = false
+			rs.stdinPrompt = ""
+			rs.stdinLabel = ""
+		case "enter":
+			text := m.stdinInput.Value() + "\n"
+			rs.stdin.Write([]byte(text)) //nolint:errcheck
+			m.stdinInput.SetValue("")
+			m.stdinInput.EchoMode = textinput.EchoNormal
+			rs.stdinVisible = false
+			rs.stdinPrompt = ""
+			rs.stdinLabel = ""
+		case "y", "Y":
+			if rs.stdinPrompt == "confirm" {
+				rs.stdin.Write([]byte("yes\n")) //nolint:errcheck
+				m.stdinInput.SetValue("")
+				m.stdinInput.EchoMode = textinput.EchoNormal
+				rs.stdinVisible = false
+				rs.stdinPrompt = ""
+				rs.stdinLabel = ""
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.stdinInput, cmd = m.stdinInput.Update(msg)
+			return m, cmd
+		case "n", "N":
+			if rs.stdinPrompt == "confirm" {
+				rs.stdin.Write([]byte("no\n")) //nolint:errcheck
+				m.stdinInput.SetValue("")
+				m.stdinInput.EchoMode = textinput.EchoNormal
+				rs.stdinVisible = false
+				rs.stdinPrompt = ""
+				rs.stdinLabel = ""
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.stdinInput, cmd = m.stdinInput.Update(msg)
+			return m, cmd
+		default:
+			var cmd tea.Cmd
+			m.stdinInput, cmd = m.stdinInput.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "tab":
 		if len(m.runningScripts) > 1 {
@@ -317,6 +390,11 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.runningScripts) > 1 {
 			m.activeRunTab = (m.activeRunTab - 1 + len(m.runningScripts)) % len(m.runningScripts)
 			m.stdinInput.EchoMode = textinput.EchoNormal
+		}
+		return m, nil
+	case "r":
+		if rs.Done {
+			return m, m.runScript(rs.Script, true)
 		}
 		return m, nil
 	case "x":
@@ -367,61 +445,10 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			rs.Scroll = 0
 		}
 	case "y", "Y":
-		if !rs.Done && rs.stdin != nil && rs.stdinVisible && rs.stdinPrompt == "confirm" {
-			rs.stdin.Write([]byte("y\n")) //nolint:errcheck
-			m.stdinInput.SetValue("")
-			m.stdinInput.EchoMode = textinput.EchoNormal
-			rs.stdinVisible = false
-			rs.stdinPrompt = ""
-			rs.stdinLabel = ""
-			return m, nil
-		}
 		if err := copyToClipboard(rs.Output()); err != nil {
 			return m, showStatus("Copy failed: no clipboard tool found")
 		}
 		return m, showStatus(fmt.Sprintf("Copied %d lines", len(rs.Lines)))
-	case "esc":
-		if !rs.Done && rs.stdin != nil && rs.stdinVisible {
-			cancelInput := "\n"
-			if rs.stdinPrompt == "confirm" {
-				cancelInput = "n\n"
-			}
-			rs.stdin.Write([]byte(cancelInput)) //nolint:errcheck
-			m.stdinInput.SetValue("")
-			m.stdinInput.EchoMode = textinput.EchoNormal
-			rs.stdinVisible = false
-			rs.stdinPrompt = ""
-			rs.stdinLabel = ""
-			return m, nil
-		}
-	case "enter":
-		if !rs.Done && rs.stdin != nil && rs.stdinVisible {
-			text := m.stdinInput.Value() + "\n"
-			rs.stdin.Write([]byte(text)) //nolint:errcheck
-			m.stdinInput.SetValue("")
-			m.stdinInput.EchoMode = textinput.EchoNormal
-			rs.stdinVisible = false
-			rs.stdinPrompt = ""
-			rs.stdinLabel = ""
-			return m, nil
-		}
-	case "n", "N":
-		if !rs.Done && rs.stdin != nil && rs.stdinVisible && rs.stdinPrompt == "confirm" {
-			rs.stdin.Write([]byte("n\n")) //nolint:errcheck
-			m.stdinInput.SetValue("")
-			m.stdinInput.EchoMode = textinput.EchoNormal
-			rs.stdinVisible = false
-			rs.stdinPrompt = ""
-			rs.stdinLabel = ""
-			return m, nil
-		}
-	}
-
-	// Route unhandled keys to stdin input when password prompt is active
-	if !rs.Done && rs.stdin != nil && rs.stdinVisible {
-		var cmd tea.Cmd
-		m.stdinInput, cmd = m.stdinInput.Update(msg)
-		return m, cmd
 	}
 
 	return m, nil
@@ -524,6 +551,18 @@ func (m model) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editCol = (m.editCol - 1 + editFieldCount) % editFieldCount
 		m.loadEditField()
 		return m, nil
+	// Explicit line nav (guarantees these work regardless of terminal)
+	case "home", "ctrl+a":
+		m.textInput.CursorStart()
+		return m, nil
+	case "end", "ctrl+e":
+		m.textInput.CursorEnd()
+		return m, nil
+	// Clear entire field
+	case "ctrl+d":
+		m.textInput.SetValue("")
+		m.textInput.SetCursor(0)
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -549,6 +588,19 @@ func (m model) updateScriptEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		m.scriptEditArea.Blur()
 		return m, showStatus("Script saved")
+	case "ctrl+d":
+		value := m.scriptEditArea.Value()
+		lineNum := m.scriptEditArea.Line()
+		lines := strings.Split(value, "\n")
+		if lineNum < len(lines) {
+			newLines := append(lines[:lineNum], lines[lineNum+1:]...)
+			m.scriptEditArea.SetValue(strings.Join(newLines, "\n"))
+			for i := 0; i < len(newLines)-1-lineNum; i++ {
+				m.scriptEditArea.CursorUp()
+			}
+			m.scriptEditArea.CursorStart()
+		}
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -828,6 +880,10 @@ func (m *model) ensureCursorVisible() {
 	visibleH := contentH - 2
 	if cursorItemIdx < m.leftScroll {
 		m.leftScroll = cursorItemIdx
+		// If a category header sits directly above, pull it into view too
+		if m.leftScroll > 0 && items[m.leftScroll-1].isHeader {
+			m.leftScroll--
+		}
 	}
 	if cursorItemIdx >= m.leftScroll+visibleH {
 		m.leftScroll = cursorItemIdx - visibleH + 1

@@ -317,6 +317,7 @@ func (m *model) runScript(script ScriptEntry, foreground bool) tea.Cmd {
 		ID:        scriptID,
 		Name:      script.Name,
 		WorkDir:   script.WorkDir,
+		Script:    script,
 		Lines:     lines,
 		StartTime: time.Now(),
 	})
@@ -505,18 +506,23 @@ func startScript(script ScriptEntry, scriptID int) tea.Cmd {
 }
 
 // openInEditor opens the given file in $VISUAL/$EDITOR, or probes for an available editor.
+// $VISUAL/$EDITOR may include flags, e.g. "cursor --wait" or "code --wait".
 func openInEditor(path string) tea.Cmd {
-	// Check env vars first
 	for _, env := range []string{"VISUAL", "EDITOR"} {
 		if e := os.Getenv(env); e != "" {
-			if _, err := exec.LookPath(e); err == nil {
-				return tea.ExecProcess(exec.Command(e, path), func(err error) tea.Msg {
+			parts := strings.Fields(e)
+			if len(parts) == 0 {
+				continue
+			}
+			if _, err := exec.LookPath(parts[0]); err == nil {
+				args := append(parts[1:], path)
+				return tea.ExecProcess(exec.Command(parts[0], args...), func(err error) tea.Msg {
 					return editorDoneMsg{}
 				})
 			}
 		}
 	}
-	// Fallback: probe
+	// Fallback: probe terminal editors
 	for _, e := range []string{"nvim", "vim", "nano", "vi"} {
 		if _, err := exec.LookPath(e); err == nil {
 			return tea.ExecProcess(exec.Command(e, path), func(err error) tea.Msg {
@@ -560,7 +566,8 @@ func listenForOutput(scriptID int, ch <-chan outputLine) tea.Cmd {
 	}
 }
 
-var confirmPromptRe = regexp.MustCompile(`(?i)(\[\s*y(?:es)?\s*/\s*n(?:o)?\s*\]|\(\s*y(?:es)?\s*/\s*n(?:o)?\s*\))`)
+// Matches [y/n], (y/n), (yes/no), (yes/no/[fingerprint]) — covers SSH host key prompts.
+var confirmPromptRe = regexp.MustCompile(`(?i)(\[\s*y(?:es)?\s*/\s*n(?:o)?\s*\]|\(\s*y(?:es)?\s*/\s*n(?:o)?(?:\s*/[^\)]+)?\s*\))`)
 
 // detectStdinPrompt returns prompt kind ("password", "confirm", "input") and
 // a cleaned prompt label from output lines.
@@ -954,14 +961,18 @@ func (m *model) startEdit() {
 	m.editRow = origIdx
 	m.editCol = 0
 
-	w := m.width - 34 // right panel width roughly
-	if w > 100 {
-		w = 100
+	leftW := 28
+	if m.width < 80 {
+		leftW = m.width / 3
 	}
-	if w < 40 {
-		w = 40
+	rightW := m.width - leftW - 5
+	if rightW > 100 {
+		rightW = 100
 	}
-	m.textInput.Width = w - 16
+	if rightW < 40 {
+		rightW = 40
+	}
+	m.textInput.Width = rightW - 14
 	m.loadEditField()
 }
 

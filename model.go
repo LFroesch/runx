@@ -91,6 +91,7 @@ type RunningScript struct {
 	ID           int
 	Name         string
 	WorkDir      string
+	Script       ScriptEntry
 	Lines        []string
 	Done         bool
 	Err          error

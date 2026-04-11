@@ -125,12 +125,43 @@ Script editing uses `$VISUAL` → `$EDITOR` → nvim → vim → nano → vi (fi
 - Full-screen terminal UIs (`fzf`, `vim`, `less`, `top`, etc.) need a normal terminal, not runx at this point in time.
 - If unresolved placeholders remain after prompting, `runx` will block execution and show which keys are missing.
 
+### SSH
+
+SSH reads passwords and key passphrases from `/dev/tty`, not stdin — the in-app password input **will not work** for plain `ssh` password prompts or `ssh-add`/passphrase-protected key logins. SSH passwords are a little tricky right now. I am still working out the kinks.
+
+**Recommended:** use SSH key auth (`ssh-copy-id user@host`).
+
+**If you must use password auth**, use `sshpass`:
+```bash
+# command: sshpass
+# args: -p mypassword ssh user@host
+# or via env var (safer — not visible in process list):
+# env: SSHPASS=mypassword
+# command: sshpass
+# args: -e ssh user@host
+```
+
+Host key prompts (`Are you sure you want to continue connecting?`) are handled by runx — type `yes` or `no` in the confirm dialog. To suppress them entirely, add `-o StrictHostKeyChecking=no` to your ssh args.
+
 ## Best Script Patterns
 
 - Prefer explicit args/flags over interactive selection where possible.
 - Use clear prompts ending with `?` or `:` for smooth input detection.
 - For optional flags, use defaults in placeholders, e.g. `{{dry=--dry-run}}`.
 - Keep long-running scripts line-oriented (flush output regularly) for the cleanest streaming UX.
+
+### Getting Prompts to Show the Input Overlay
+
+runx auto-detects interactive prompts from your script's output and shows an in-app input dialog. Use `printf` (no trailing newline) so the prompt text flushes immediately:
+
+| Trigger | Overlay type | Example |
+|---------|-------------|---------|
+| Line contains `password` or `passphrase` | Masked input | `printf "Enter password: "` |
+| Line matches `[y/n]`, `(yes/no)`, `(yes/no/[fingerprint])` | Confirm (`y/n → yes/no`) | `printf "Continue? [y/n] "` |
+| Line ends with `?` | Text input | `printf "What is your name? "` |
+| Line ends with `:` + keyword (`enter`, `input`, `value`, etc.) | Text input | `printf "Enter token: "` |
+
+`read` calls with `-s` (silent) are fine — runx masks the input field regardless when it detects a password prompt. Always pair with `printf` or `echo` for the prompt text, since runx reads output lines to decide what overlay to show.
 
 ## License
 

@@ -1,5 +1,17 @@
 ## DevLog
 
+### 2026-04-10: Stdin overlay — full key isolation + yes/no fix
+
+- **Key bleed fixed**: restructured `updateRunningPage` with a top-level stdin guard — when overlay is active, ALL keys are intercepted before normal page handlers; `r`/`x`/`tab`/`y`/`1-4` etc. no longer fire page-level actions while typing
+- **yes/no quick reply**: confirm quick keys now send `yes\n`/`no\n` instead of `y\n`/`n\n` — works correctly with SSH host key prompts
+- **Prompt trigger docs**: added table to README documenting exactly which output patterns trigger each overlay type (password, confirm, input) and the `printf` pattern for scripts
+
+### 2026-04-10: SSH docs + stdin overlay fix
+
+- **SSH note in README**: SSH reads passwords from `/dev/tty` not stdin — in-app password input won't work for plain `ssh`; documented `sshpass` workaround and key auth recommendation; host key confirm prompts are handled
+- **Confirm regex**: extended to match `(yes/no/[fingerprint])` — SSH host key prompts now correctly detected as `"confirm"` (y/n quick keys work) instead of falling through to generic `"input"`
+- **Test script**: `test-scripts/test-stdin.sh` covers all four overlay types: input, confirm, password, SSH-style host key confirm
+
 ### 2026-04-07: Running page fixes
 
 - **Stdin input now visible**: stdin input was handled in update but never rendered — added always-visible sep+input line at bottom; shows labeled prompt when active (`password`/`confirm [y/n]`/`input`), dim "stdin ready" otherwise to avoid layout jump
