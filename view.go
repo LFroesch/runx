@@ -78,7 +78,7 @@ func (m model) View() string {
 // --- Header ---
 
 func (m model) renderHeader() string {
-	title := titleStyle.Render("Runx")
+	title := titleStyle.Render("Runx") + " " + dimTextStyle.Render(version)
 
 	pages := []struct {
 		name string
@@ -143,7 +143,13 @@ func (m model) renderHeader() string {
 	rightWidth := lipgloss.Width(right)
 	gap := m.width - leftWidth - rightWidth
 	if gap < 2 {
-		gap = 2
+		// Not enough room for right stats — drop them to avoid wrapping
+		right = ""
+		rightWidth = 0
+		gap = m.width - leftWidth
+		if gap < 0 {
+			gap = 0
+		}
 	}
 
 	headerLine := left + strings.Repeat(" ", gap) + right
@@ -244,6 +250,13 @@ func (m model) renderScriptsPage() string {
 		leftW = m.width / 3
 	}
 	rightW := m.width - leftW - 5 // account for borders + gap
+	if rightW < 8 {
+		rightW = 8
+		leftW = m.width - rightW - 5
+		if leftW < 5 {
+			leftW = 5
+		}
+	}
 
 	// Build left panel items
 	items := m.buildLeftPanelItems()
@@ -301,7 +314,8 @@ func (m model) renderScriptsPage() string {
 	for i := scroll; i < endIdx; i++ {
 		item := items[i]
 		if item.isHeader {
-			leftLines = append(leftLines, categoryHeaderStyle.Render(item.label))
+			label := xansi.Truncate(item.label, leftW-2, "...")
+			leftLines = append(leftLines, categoryHeaderStyle.Render(label))
 		} else {
 			name := item.label
 			if len(name) > leftW-4 {
@@ -341,7 +355,14 @@ func (m model) renderScriptsPage() string {
 	default:
 		rightContent = m.renderDetailPanel(rightW)
 	}
-	rightPanel := panelStyle.Width(rightW).Height(contentH - 2).Render(rightContent)
+	// Clip right content to panel height so it never overflows on short terminals
+	panelInnerH := contentH - 2
+	rightLines := strings.Split(rightContent, "\n")
+	if len(rightLines) > panelInnerH {
+		rightLines = rightLines[:panelInnerH]
+	}
+	rightContent = strings.Join(rightLines, "\n")
+	rightPanel := panelStyle.Width(rightW).Height(panelInnerH).Render(rightContent)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, " ", rightPanel)
 }
@@ -441,7 +462,7 @@ func (m model) renderDetailPanel(w int) string {
 			}
 			pNames = append(pNames, s)
 		}
-		lines = append(lines, detailLabelStyle.Render("Params")+dimTextStyle.Render(strings.Join(pNames, ", ")))
+		lines = append(lines, detailLabelStyle.Render("Params")+dimTextStyle.Render(xansi.Truncate(strings.Join(pNames, ", "), valW, "...")))
 	}
 
 	lines = append(lines, "")
@@ -927,6 +948,7 @@ func (m model) renderHelp() string {
 			{"{{name}}", "Prompt for value before run"},
 			{"{{name=default}}", "Prompt with pre-filled default"},
 			{"{{name:Desc=default}}", "Prompt with description label"},
+			{"{{name:a|b|c=a}}", "Enum picker (↑/↓ to select)"},
 			{"{{ name }}", "Spaces inside braces are allowed"},
 		}},
 		{"Edit", []helpKey{
@@ -945,7 +967,10 @@ func (m model) renderHelp() string {
 		{"Running", []helpKey{
 			{"j/k", "Scroll"},
 			{"G/g", "End / top"},
+			{"ctrl+d/u", "Page down / up"},
 			{"tab", "Switch tabs"},
+			{"r", "Rerun script"},
+			{"y", "Copy output to clipboard"},
 			{"y/n", "Quick confirm reply when prompted"},
 			{"x", "Close tab"},
 		}},

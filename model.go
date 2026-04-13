@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -46,6 +47,7 @@ const (
 // --- Types ---
 
 type ScriptEntry struct {
+	ID          string            `json:"id,omitempty"`
 	Name        string            `json:"name"`
 	Command     string            `json:"command"`
 	Flags       []string          `json:"flags,omitempty"`
@@ -98,6 +100,7 @@ type RunningScript struct {
 	Scroll       int
 	StartTime    time.Time
 	EndTime      time.Time
+	cmd          *exec.Cmd
 	ch           <-chan outputLine
 	stdin        io.WriteCloser
 	stdinVisible bool   // set true when interactive prompt detected
@@ -200,6 +203,7 @@ type statusMsg struct {
 
 type scriptStartedMsg struct {
 	scriptID int
+	cmd      *exec.Cmd
 	ch       <-chan outputLine
 	stdin    io.WriteCloser
 }

@@ -27,6 +27,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case scriptStartedMsg:
 		if rs := m.findRunningScript(msg.scriptID); rs != nil {
+			rs.cmd = msg.cmd
 			rs.ch = msg.ch
 			rs.stdin = msg.stdin
 			return m, listenForOutput(msg.scriptID, msg.ch)
@@ -113,6 +114,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// ctrl+c always quits regardless of mode
 		if msg.String() == "ctrl+c" {
+			m.killRunningScripts()
 			return m, tea.Quit
 		}
 		// Handle modal modes first
@@ -158,6 +160,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q":
 			if m.page == pageScripts {
+				m.killRunningScripts()
 				return m, tea.Quit
 			}
 			m.page = pageScripts
@@ -720,6 +723,7 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "n", "a":
 		newScript := ScriptEntry{
+			ID:      generateID(),
 			Name:    "New Script",
 			Command: "echo",
 			Args:    []string{"Hello, World!"},
@@ -730,8 +734,7 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateVisibleScripts()
 		// Move cursor to the new script
 		for i, idx := range m.visibleScripts {
-			if m.scripts[idx].Name == newScript.Name &&
-				m.scripts[idx].Command == newScript.Command {
+			if m.scripts[idx].ID == newScript.ID {
 				m.scriptCursor = i
 				break
 			}

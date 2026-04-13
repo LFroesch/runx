@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,7 +25,7 @@ import (
 var placeholderRe = regexp.MustCompile(`\{\{\s*([A-Za-z0-9][A-Za-z0-9_.-]*)(?:\s*:\s*([^=}]*?))?(?:\s*=\s*([^}]*?))?\s*\}\}`)
 var ttyInteractiveRe = regexp.MustCompile(`(?i)\b(fzf|gum|whiptail|dialog|vim|nvim|less|more|top|htop|watch|tmux)\b`)
 
-// shellSplit splits a command string into tokens, respecting quotes.
+// shellSplit splits a command string into tokens, respecting quotes and backslash escapes.
 func shellSplit(s string) []string {
 	var tokens []string
 	var cur strings.Builder
@@ -31,6 +33,16 @@ func shellSplit(s string) []string {
 	quoteChar := byte(0)
 	for i := 0; i < len(s); i++ {
 		c := s[i]
+		if c == '\\' && i+1 < len(s) {
+			// In single quotes, backslash is literal
+			if inQuote && quoteChar == '\'' {
+				cur.WriteByte(c)
+				continue
+			}
+			i++
+			cur.WriteByte(s[i])
+			continue
+		}
 		if inQuote {
 			if c == quoteChar {
 				inQuote = false
@@ -53,6 +65,25 @@ func shellSplit(s string) []string {
 		tokens = append(tokens, cur.String())
 	}
 	return tokens
+}
+
+// generateID returns a short random hex string for script identity.
+func generateID() string {
+	b := make([]byte, 4)
+	cryptorand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// ensureScriptIDs assigns IDs to any scripts missing one. Returns true if any were added.
+func ensureScriptIDs(scripts []ScriptEntry) bool {
+	changed := false
+	for i := range scripts {
+		if scripts[i].ID == "" {
+			scripts[i].ID = generateID()
+			changed = true
+		}
+	}
+	return changed
 }
 
 // --- Config / IO ---
@@ -93,13 +124,22 @@ func (m *model) saveScripts() {
 	manager := ScriptManager{Scripts: m.scripts}
 	data, err := json.MarshalIndent(manager, "", "  ")
 	if err != nil {
+		m.statusMsg = fmt.Sprintf("Save failed: %v", err)
+		m.statusExpiry = time.Now().Add(5 * time.Second)
 		return
 	}
-	os.MkdirAll(filepath.Dir(m.configFile), 0755)
+	if err := os.MkdirAll(filepath.Dir(m.configFile), 0755); err != nil {
+		m.statusMsg = fmt.Sprintf("Save failed: %v", err)
+		m.statusExpiry = time.Now().Add(5 * time.Second)
+		return
+	}
 	if existing, readErr := os.ReadFile(m.configFile); readErr == nil {
 		_ = os.WriteFile(m.configFile+".bak", existing, 0644)
 	}
-	os.WriteFile(m.configFile, data, 0644)
+	if err := os.WriteFile(m.configFile, data, 0644); err != nil {
+		m.statusMsg = fmt.Sprintf("Save failed: %v", err)
+		m.statusExpiry = time.Now().Add(5 * time.Second)
+	}
 }
 
 // findScriptFile looks through a script's command+args for a real file on disk.
@@ -146,11 +186,9 @@ func (m *model) updateVisibleScripts() {
 				continue
 			}
 		}
-		// Find original index
+		// Find original index by ID
 		for i := range m.scripts {
-			if m.scripts[i].Name == script.Name &&
-				m.scripts[i].Command == script.Command &&
-				m.scripts[i].Category == script.Category {
+			if m.scripts[i].ID == script.ID {
 				m.visibleScripts = append(m.visibleScripts, i)
 				break
 			}
@@ -501,7 +539,7 @@ func startScript(script ScriptEntry, scriptID int) tea.Cmd {
 		if stdinErr == nil {
 			stdin = stdinPipe
 		}
-		return scriptStartedMsg{scriptID: scriptID, ch: ch, stdin: stdin}
+		return scriptStartedMsg{scriptID: scriptID, cmd: cmd, ch: ch, stdin: stdin}
 	}
 }
 
@@ -607,6 +645,16 @@ func (m *model) findRunningScript(id int) *RunningScript {
 		}
 	}
 	return nil
+}
+
+// killRunningScripts signals all running child processes to terminate.
+func (m *model) killRunningScripts() {
+	for i := range m.runningScripts {
+		rs := &m.runningScripts[i]
+		if !rs.Done && rs.cmd != nil && rs.cmd.Process != nil {
+			rs.cmd.Process.Kill()
+		}
+	}
 }
 
 // --- Output file management ---

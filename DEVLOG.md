@@ -1,5 +1,18 @@
 ## DevLog
 
+### 2026-04-13: Industry-standard hardening
+
+- **CLI flags**: `--version` (injected via `-ldflags -X main.version`), `--config` for custom config path, `--help`
+- **Graceful shutdown**: `*exec.Cmd` stored on `RunningScript`; `killRunningScripts()` called on quit/ctrl+c — no more orphaned child processes
+- **Stable script IDs**: each `ScriptEntry` gets a random hex `id` field (persisted in JSON); `updateVisibleScripts` matches by ID instead of name+command+category — eliminates collision for duplicate names
+- **Save error reporting**: `saveScripts()` now surfaces marshal/mkdir/write failures via status message instead of silently dropping errors
+- **shellSplit backslash escapes**: handles `\"`, `\ `, etc. in double-quoted and unquoted contexts; single quotes treat backslash as literal (POSIX-correct)
+- **Makefile**: added `test`, `vet`, `lint`, `clean` targets; `build` injects version from `git describe`
+- **Release workflow**: ldflags now inject `GITHUB_REF_NAME` as version in release binaries
+- **Version in header**: TUI header shows version string next to title
+- **Test coverage**: expanded from 3 to 25+ tests — shellSplit (basic, quoted, escapes, empty), detectStdinPrompt (password, confirm variants, input, colon, empty, no-match), humanDuration, loadScripts (corrupt, backup recovery, missing), ensureScriptIDs, sort modes, generateID uniqueness, expandPath, formatElapsed
+- **Cleanup**: removed unused styles (colorBg, panelHeaderStyle, detailValueStyle), cleaned .gitignore of stale tui-suite entries, ran `go mod tidy`
+
 ### 2026-04-10: Stdin overlay — full key isolation + yes/no fix
 
 - **Key bleed fixed**: restructured `updateRunningPage` with a top-level stdin guard — when overlay is active, ALL keys are intercepted before normal page handlers; `r`/`x`/`tab`/`y`/`1-4` etc. no longer fire page-level actions while typing

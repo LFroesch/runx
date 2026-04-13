@@ -26,10 +26,12 @@ Or build from source:
 make install
 ```
 
-Command:
+Commands:
 
 ```bash
-runx
+runx              # Launch TUI
+runx --version    # Print version
+runx --config /path/to/scripts.json  # Use custom config
 ```
 
 ### Quick Start

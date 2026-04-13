@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"flag"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,12 +14,32 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+var version = "dev"
+
 func main() {
+	showVersion := flag.Bool("version", false, "Print version and exit")
+	configPath := flag.String("config", "", "Path to config file")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "runx — TUI script runner and manager\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: runx [flags]\n\n")
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("runx " + version)
+		os.Exit(0)
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatal(err)
 	}
-	configFile := filepath.Join(homeDir, ".config", "runx", "runx-scripts.json")
+
+	configFile := *configPath
+	if configFile == "" {
+		configFile = filepath.Join(homeDir, ".config", "runx", "runx-scripts.json")
+	}
 
 	ti := textinput.New()
 	ti.CharLimit = 2000
@@ -33,8 +56,18 @@ func main() {
 	ea.CharLimit = 0
 	ea.ShowLineNumbers = false
 
+	scripts := loadScripts(configFile)
+	if ensureScriptIDs(scripts) {
+		// Persist newly assigned IDs
+		manager := ScriptManager{Scripts: scripts}
+		if data, err := json.MarshalIndent(manager, "", "  "); err == nil {
+			os.MkdirAll(filepath.Dir(configFile), 0755)
+			os.WriteFile(configFile, data, 0644)
+		}
+	}
+
 	m := model{
-		scripts:        loadScripts(configFile),
+		scripts:        scripts,
 		configFile:     configFile,
 		width:          100,
 		height:         24,

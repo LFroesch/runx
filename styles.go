@@ -9,8 +9,7 @@ var (
 	colorWarn    = lipgloss.Color("#FF6AC1") // pink
 	colorError   = lipgloss.Color("#FF5C57") // red
 	colorDim     = lipgloss.Color("#606060")
-	colorText    = lipgloss.Color("#EEEEEE")
-	colorBg      = lipgloss.Color("#1A1A2E")
+	colorText = lipgloss.Color("#EEEEEE")
 
 	// Header
 	titleStyle = lipgloss.NewStyle().
@@ -72,10 +71,6 @@ var (
 				BorderForeground(colorAccent).
 				Padding(0, 1)
 
-	panelHeaderStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(colorAccent)
-
 	categoryHeaderStyle = lipgloss.NewStyle().
 				Foreground(colorWarn).
 				Bold(true)
@@ -108,6 +103,4 @@ var (
 				Foreground(colorAccent).
 				Width(12)
 
-	detailValueStyle = lipgloss.NewStyle().
-				Foreground(colorText)
 )

@@ -14,17 +14,8 @@
 # Go workspace file
 go.work
 
-# Built binaries (app-specific)
-backup-xd
-dwight
-git-helper
-lif
-logdog
-portmon
-project-launcher
-scout
+# Built binary
 runx
-zap
 
 # OS files
 .DS_Store
@@ -41,8 +32,7 @@ Thumbs.db
 .claude/
 CLAUDE.md
 WORK.md
-agent_spec.md
-script_ideas.md
+
 # Allow release workflow even when .github is globally ignored
 !.github/
 !.github/workflows/
