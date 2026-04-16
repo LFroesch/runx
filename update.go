@@ -10,6 +10,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// reposViewMsg is a no-op message used to trigger textarea.repositionView()
+// after manual cursor navigation (CursorUp/CursorDown don't update the viewport).
+type reposViewMsg struct{}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
@@ -592,16 +596,27 @@ func (m model) updateScriptEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scriptEditArea.Blur()
 		return m, showStatus("Script saved")
 	case "ctrl+d":
+		// Delete current line, reposition cursor to same line number.
 		value := m.scriptEditArea.Value()
 		lineNum := m.scriptEditArea.Line()
 		lines := strings.Split(value, "\n")
 		if lineNum < len(lines) {
 			newLines := append(lines[:lineNum], lines[lineNum+1:]...)
 			m.scriptEditArea.SetValue(strings.Join(newLines, "\n"))
-			for i := 0; i < len(newLines)-1-lineNum; i++ {
+			// SetValue leaves cursor at end; move up to target line.
+			target := lineNum
+			if target >= len(newLines) {
+				target = len(newLines) - 1
+			}
+			if target < 0 {
+				target = 0
+			}
+			for i := 0; i < len(newLines)-1-target; i++ {
 				m.scriptEditArea.CursorUp()
 			}
 			m.scriptEditArea.CursorStart()
+			// CursorUp doesn't call repositionView; pass a no-op msg to trigger it.
+			m.scriptEditArea, _ = m.scriptEditArea.Update(reposViewMsg{})
 		}
 		return m, nil
 	}
