@@ -21,20 +21,40 @@ import (
 )
 
 // Placeholder syntax: {{name}}, {{name=default}}, {{name:Description=default}}
-// Supports optional inner whitespace and names like "foo.bar" or "open-job".
-var placeholderRe = regexp.MustCompile(`\{\{\s*([A-Za-z0-9][A-Za-z0-9_.-]*)(?:\s*:\s*([^=}]*?))?(?:\s*=\s*([^}]*?))?\s*\}\}`)
+// Names may contain spaces (e.g. {{location title:opt1|opt2=default}}).
+var placeholderRe = regexp.MustCompile(`\{\{\s*([A-Za-z0-9][A-Za-z0-9_ .-]*)(?:\s*:\s*([^=}]*?))?(?:\s*=\s*([^}]*?))?\s*\}\}`)
 var ttyInteractiveRe = regexp.MustCompile(`(?i)\b(fzf|gum|whiptail|dialog|vim|nvim|less|more|top|htop|watch|tmux)\b`)
 
-// shellSplit splits a command string into tokens, respecting quotes and backslash escapes.
+// shellSplit splits a command string into tokens, respecting quotes, backslash
+// escapes, and {{...}} placeholder blocks (spaces inside placeholders are preserved).
 func shellSplit(s string) []string {
 	var tokens []string
 	var cur strings.Builder
 	inQuote := false
 	quoteChar := byte(0)
+	inPlaceholder := false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
+		// Detect {{ opening (outside quotes)
+		if !inQuote && !inPlaceholder && c == '{' && i+1 < len(s) && s[i+1] == '{' {
+			inPlaceholder = true
+			cur.WriteByte(c)
+			continue
+		}
+		// Detect }} closing
+		if inPlaceholder && c == '}' && i+1 < len(s) && s[i+1] == '}' {
+			inPlaceholder = false
+			cur.WriteByte(c)
+			i++
+			cur.WriteByte(s[i])
+			continue
+		}
+		// Inside a placeholder — never split
+		if inPlaceholder {
+			cur.WriteByte(c)
+			continue
+		}
 		if c == '\\' && i+1 < len(s) {
-			// In single quotes, backslash is literal
 			if inQuote && quoteChar == '\'' {
 				cur.WriteByte(c)
 				continue

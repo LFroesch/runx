@@ -47,13 +47,12 @@ runx --config /path/to/scripts.json  # Use custom config
 - **Page navigation** — Switch between Scripts, Schedules, History, and Running with `1/2/3/4`
 - **Streaming output** — See script output in real-time as it runs
 - **Concurrent execution** — Run multiple scripts simultaneously, tab between outputs
-- **Cron scheduling** — Run scripts on intervals (5m, 1h, etc.) with in-app scheduler
+- **Cron scheduling** — Run scripts on intervals (5m, 1h, etc.) with in-app scheduler. `last_run` is persisted, so schedules survive quit/reopen. Minimum interval 1m; ticks every 30s, so firing time can drift up to ~30s.
 - **Category grouping** — Organize scripts by category with emoji icons
 - **Search / filter** — `/` to live-filter by name, category, command, description, or tags
 - **Parameterized scripts** — `{{name}}`, `{{name=default}}`, `{{name:Desc=default}}` placeholders prompt before running
 - **Interactive input support** — Password/input/confirm prompts handled in-app (`y/n` quick confirm)
 - **Tags & env vars** — Per-script tags and environment variables
-- **Dry run** — Preview resolved command before executing
 - **Output capture** — All output saved with timestamps to `~/.local/share/runx/`
 - **Run tracking** — Last run time, execution count, and sort by usage
 
@@ -75,7 +74,6 @@ runx --config /path/to/scripts.json  # Use custom config
 | `G/g` | Jump to bottom/top |
 | `ctrl+d/u` | Page down/up |
 | `enter`, `space` | Run script |
-| `D` | Dry run preview |
 | `e` | Edit script |
 | `n/a` | Add new script |
 | `d` | Delete script |

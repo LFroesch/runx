@@ -80,6 +80,20 @@ func TestShellSplitEmpty(t *testing.T) {
 	}
 }
 
+func TestShellSplitPlaceholderWithSpaces(t *testing.T) {
+	// Spaces inside {{ }} must not split the token
+	got := shellSplit(`--only={{location title:|remote|sf=}} --hours=72`)
+	want := []string{"--only={{location title:|remote|sf=}}", "--hours=72"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("token %d: got %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 // --- detectStdinPrompt ---
 
 func TestDetectStdinPromptPassword(t *testing.T) {

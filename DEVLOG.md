@@ -1,5 +1,17 @@
 ## DevLog
 
+### 2026-04-30: Bug fixes — param spaces, stop script, help scroll
+
+- **`shellSplit`**: now treats `{{...}}` blocks as atomic — spaces inside placeholders no longer split args/flags into separate tokens
+- **Placeholder regex**: updated to allow spaces in placeholder names (e.g. `{{location title:opt1|opt2=default}}`)
+- **Stop script**: added `s` key on Running page to kill the active running process
+- **Help scroll**: help overlay now scrolls with `j/k/G/g/ctrl+d/ctrl+u` when content exceeds terminal height
+
+### 2026-04-18: Drop dry run mode
+
+- Removed `D` keybind + `modeDryRun` + `renderDryRunPanel` — redundant with the detail panel and didn't actually dry-execute anything
+- Added "Full Cmd" line to `renderDetailPanel` (shown when flags/args present) to preserve the one unique bit of the dry run view
+
 ### 2026-04-13: Industry-standard hardening
 
 - **CLI flags**: `--version` (injected via `-ldflags -X main.version`), `--config` for custom config path, `--help`

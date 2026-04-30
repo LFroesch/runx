@@ -187,7 +187,6 @@ func (m model) renderFooter() string {
 			add("ctrl+home/end", "top/bottom")
 		} else {
 			add("enter", "run")
-			add("D", "dry run")
 			add("e/E", "edit")
 			add("n", "add")
 			add("d", "delete")
@@ -207,8 +206,13 @@ func (m model) renderFooter() string {
 			add("tab", "switch")
 		}
 		add("y", "copy")
-		if m.activeRunTab < len(m.runningScripts) && m.runningScripts[m.activeRunTab].Done {
-			add("r", "rerun")
+		if m.activeRunTab < len(m.runningScripts) {
+			rs := m.runningScripts[m.activeRunTab]
+			if rs.Done {
+				add("r", "rerun")
+			} else {
+				add("s", "stop")
+			}
 		}
 		add("x", "close tab")
 	}
@@ -348,8 +352,6 @@ func (m model) renderScriptsPage() string {
 	switch m.mode {
 	case modeEdit:
 		rightContent = m.renderEditPanel(rightW)
-	case modeDryRun:
-		rightContent = m.renderDryRunPanel(rightW)
 	case modeScriptEdit:
 		rightContent = m.renderScriptEditPanel(rightW, contentH-2)
 	default:
@@ -418,6 +420,9 @@ func (m model) renderDetailPanel(w int) string {
 	if len(script.Args) > 0 {
 		addField("Args", strings.Join(script.Args, " "))
 	}
+	if len(script.Flags) > 0 || len(script.Args) > 0 {
+		addField("Full Cmd", script.FullCommand())
+	}
 	addField("Work Dir", script.WorkDir)
 	addField("Desc", script.Description)
 	if len(script.Tags) > 0 {
@@ -467,8 +472,7 @@ func (m model) renderDetailPanel(w int) string {
 
 	lines = append(lines, "")
 	hints := keyStyle.Render("enter") + " run  " +
-		keyStyle.Render("e") + " edit  " +
-		keyStyle.Render("D") + " dry run"
+		keyStyle.Render("e") + " edit"
 	lines = append(lines, hints)
 
 	return strings.Join(lines, "\n")
@@ -520,53 +524,6 @@ func (m model) renderEditPanel(w int) string {
 		keyStyle.Render("tab"), keyStyle.Render("shift+tab"),
 		keyStyle.Render("enter"), keyStyle.Render("esc"))
 	lines = append(lines, dimTextStyle.Render(hints))
-
-	return strings.Join(lines, "\n")
-}
-
-// renderDryRunPanel shows dry run preview in the right panel.
-func (m model) renderDryRunPanel(w int) string {
-	if m.scriptCursor < 0 || m.scriptCursor >= len(m.visibleScripts) {
-		return ""
-	}
-
-	script := m.scripts[m.visibleScripts[m.scriptCursor]]
-
-	var lines []string
-	lines = append(lines, titleStyle.Render("Dry Run Preview"))
-	lines = append(lines, "")
-
-	addField := func(label, value string) {
-		lines = append(lines, fieldLabelStyle.Render(label)+value)
-	}
-
-	addField("Name", script.Name)
-	addField("Command", script.FullCommand())
-	addField("Work Dir", expandPath(script.WorkDir))
-	if len(script.Tags) > 0 {
-		addField("Tags", strings.Join(script.Tags, ", "))
-	}
-	if len(script.EnvVars) > 0 {
-		var pairs []string
-		for k, v := range script.EnvVars {
-			pairs = append(pairs, k+"="+v)
-		}
-		addField("Env Vars", strings.Join(pairs, ", "))
-	}
-	if script.Schedule != "" {
-		status := "OFF"
-		if script.ScheduleOn {
-			status = "ON"
-		}
-		addField("Schedule", fmt.Sprintf("every %s (%s)", script.Schedule, status))
-	}
-	if script.RunCount > 0 {
-		addField("Run Count", fmt.Sprintf("%d", script.RunCount))
-	}
-	if script.LastRun != "" {
-		addField("Last Run", script.LastRun)
-	}
-	lines = append(lines, "", dimTextStyle.Render("enter/space to run · any other key to close"))
 
 	return strings.Join(lines, "\n")
 }
@@ -949,7 +906,7 @@ func (m model) renderHelp() string {
 			{"{{name=default}}", "Prompt with pre-filled default"},
 			{"{{name:Desc=default}}", "Prompt with description label"},
 			{"{{name:a|b|c=a}}", "Enum picker (↑/↓ to select)"},
-			{"{{ name }}", "Spaces inside braces are allowed"},
+			{"{{my name:a|b=a}}", "Spaces allowed in placeholder names"},
 		}},
 		{"Edit", []helpKey{
 			{"tab/shift+tab", "Next / prev field"},
@@ -969,10 +926,11 @@ func (m model) renderHelp() string {
 			{"G/g", "End / top"},
 			{"ctrl+d/u", "Page down / up"},
 			{"tab", "Switch tabs"},
-			{"r", "Rerun script"},
+			{"s", "Stop running script"},
+			{"r", "Rerun script (when done)"},
 			{"y", "Copy output to clipboard"},
 			{"y/n", "Quick confirm reply when prompted"},
-			{"x", "Close tab"},
+			{"x", "Close tab (when done)"},
 		}},
 	}
 
@@ -988,7 +946,36 @@ func (m model) renderHelp() string {
 		}
 		lines = append(lines, "")
 	}
-	lines = append(lines, dimTextStyle.Render("Press ? or esc to close"))
+	lines = append(lines, dimTextStyle.Render("j/k scroll  ? or esc to close"))
+
+	// Apply scroll window
+	visH := m.height - 6
+	if visH < 5 {
+		visH = 5
+	}
+	total := len(lines)
+	scroll := m.helpScroll
+	if scroll > total-visH {
+		scroll = total - visH
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+	if total > visH {
+		end := scroll + visH
+		if end > total {
+			end = total
+		}
+		slice := make([]string, end-scroll)
+		copy(slice, lines[scroll:end])
+		if scroll > 0 {
+			slice[0] = dimTextStyle.Render(fmt.Sprintf("▲ %d more above", scroll))
+		}
+		if end < total {
+			slice[len(slice)-1] = dimTextStyle.Render(fmt.Sprintf("▼ %d more below", total-end))
+		}
+		lines = slice
+	}
 
 	dialog := dialogStyle.
 		BorderForeground(colorPrimary).

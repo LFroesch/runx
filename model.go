@@ -33,7 +33,6 @@ const (
 	modeHelp
 	modeSearch
 	modeClear
-	modeDryRun
 	modeParamPrompt
 	modeScheduleEdit
 )
@@ -181,6 +180,9 @@ type model struct {
 	paramOptions       [][]string // non-nil slice means enum picker (from {{name:opt1|opt2=default}})
 	paramOptionCursors []int      // selected index per enum field
 	paramCursor        int
+
+	// Help overlay
+	helpScroll int
 
 	// Schedule
 	cronTable      table.Model

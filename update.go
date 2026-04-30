@@ -123,17 +123,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Handle modal modes first
 		switch m.mode {
-		case modeDryRun:
-			if msg.String() == "enter" || msg.String() == " " {
-				m.mode = modeNormal
-				script := m.currentScript()
-				if script != nil {
-					return m, m.runScript(*script, true)
-				}
-				return m, nil
-			}
-			m.mode = modeNormal
-			return m, nil
 		case modeParamPrompt:
 			return m.updateParamMode(msg)
 		case modeHelp:
@@ -171,6 +160,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "?":
 			m.mode = modeHelp
+			m.helpScroll = 0
 			return m, nil
 		case "1":
 			m.page = pageScripts
@@ -218,6 +208,23 @@ func (m model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "?", "esc", "q":
 		m.mode = modeNormal
+	case "j", "down":
+		m.helpScroll++
+	case "k", "up":
+		if m.helpScroll > 0 {
+			m.helpScroll--
+		}
+	case "g":
+		m.helpScroll = 0
+	case "G":
+		m.helpScroll = 9999 // clamped in renderHelp
+	case "ctrl+d", "pagedown":
+		m.helpScroll += (m.height - 6) / 2
+	case "ctrl+u", "pageup":
+		m.helpScroll -= (m.height - 6) / 2
+		if m.helpScroll < 0 {
+			m.helpScroll = 0
+		}
 	}
 	return m, nil
 }
@@ -397,6 +404,11 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.runningScripts) > 1 {
 			m.activeRunTab = (m.activeRunTab - 1 + len(m.runningScripts)) % len(m.runningScripts)
 			m.stdinInput.EchoMode = textinput.EchoNormal
+		}
+		return m, nil
+	case "s":
+		if !rs.Done && rs.cmd != nil && rs.cmd.Process != nil {
+			rs.cmd.Process.Kill()
 		}
 		return m, nil
 	case "r":
@@ -805,12 +817,6 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, showStatus(fmt.Sprintf("Unresolved placeholders: %s", strings.Join(unresolved, ", ")))
 			}
 			return m, m.runScript(*script, true)
-		}
-		return m, nil
-	case "D":
-		script := m.currentScript()
-		if script != nil {
-			m.mode = modeDryRun
 		}
 		return m, nil
 	case "s":
