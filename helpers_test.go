@@ -287,6 +287,32 @@ func TestSubstitutePlaceholdersAppliesWorkdirAndEnv(t *testing.T) {
 	}
 }
 
+func TestSubstitutePlaceholdersOmitsEmptyEnumArg(t *testing.T) {
+	s := ScriptEntry{
+		Command: "echo",
+		Args:    []string{"{{mode:|--dry-run=}}", "tail"},
+	}
+	out := substitutePlaceholders(s, map[string]string{"mode": ""})
+	if len(out.Args) != 1 || out.Args[0] != "tail" {
+		t.Fatalf("expected empty enum arg to be omitted, got %v", out.Args)
+	}
+}
+
+func TestSubstitutePlaceholdersOmitsLegacyDashDashEnumArg(t *testing.T) {
+	s := ScriptEntry{
+		Command: "echo",
+		Flags:   []string{"{{dry:--|--dry-run=--}}"},
+		Args:    []string{"{{dirty:--|--allow-dirty=--}}", "tail"},
+	}
+	out := substitutePlaceholders(s, nil)
+	if len(out.Flags) != 0 {
+		t.Fatalf("expected legacy '--' enum flag to be omitted, got %v", out.Flags)
+	}
+	if len(out.Args) != 1 || out.Args[0] != "tail" {
+		t.Fatalf("expected legacy '--' enum arg to be omitted, got %v", out.Args)
+	}
+}
+
 func TestUnresolvedPlaceholders(t *testing.T) {
 	s := ScriptEntry{
 		Command: "echo {{name}}",

@@ -413,7 +413,20 @@ func (m model) updateRunningPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "r":
 		if rs.Done {
-			return m, m.runScript(rs.Script, true)
+			// Re-prompt for params/flags so user can toggle dry-run, change values, etc.
+			// Resolve a live pointer by ID so edits since launch are honored.
+			var live *ScriptEntry
+			for i := range m.scripts {
+				if m.scripts[i].ID == rs.Script.ID {
+					live = &m.scripts[i]
+					break
+				}
+			}
+			if live == nil {
+				cp := rs.Script
+				live = &cp
+			}
+			return m, m.promptOrRun(live)
 		}
 		return m, nil
 	case "x":

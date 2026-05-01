@@ -244,7 +244,7 @@ func (m *model) currentScriptIndex() int {
 
 type paramField struct {
 	Name    string
-	Desc    string   // optional: from {{name:Description=default}}
+	Desc    string // optional: from {{name:Description=default}}
 	Default string
 	Options []string // non-nil when desc is "opt1|opt2|opt3" (enum picker)
 }
@@ -298,6 +298,29 @@ func extractPlaceholders(script ScriptEntry) []paramField {
 	return fields
 }
 
+func exactPlaceholderField(s string) (paramField, bool) {
+	match := placeholderRe.FindStringSubmatch(s)
+	if match == nil || match[0] != s {
+		return paramField{}, false
+	}
+	name, desc, def := normalizePlaceholderParts(match[1], match[2], match[3])
+	var opts []string
+	if strings.Contains(desc, "|") {
+		opts = strings.Split(desc, "|")
+		desc = ""
+	}
+	return paramField{Name: name, Desc: desc, Default: def, Options: opts}, true
+}
+
+func shouldOmitStandalonePlaceholderArg(original, replaced string) bool {
+	field, ok := exactPlaceholderField(strings.TrimSpace(original))
+	if !ok || len(field.Options) == 0 {
+		return false
+	}
+	trimmed := strings.TrimSpace(replaced)
+	return trimmed == "" || trimmed == "--"
+}
+
 func unresolvedPlaceholders(script ScriptEntry) []string {
 	seen := map[string]bool{}
 	var unresolved []string
@@ -341,14 +364,22 @@ func substitutePlaceholders(script ScriptEntry, values map[string]string) Script
 		})
 	}
 	result.Command = replace(result.Command)
-	newFlags := make([]string, len(result.Flags))
-	for i, f := range result.Flags {
-		newFlags[i] = replace(f)
+	newFlags := make([]string, 0, len(result.Flags))
+	for _, f := range result.Flags {
+		replaced := replace(f)
+		if shouldOmitStandalonePlaceholderArg(f, replaced) {
+			continue
+		}
+		newFlags = append(newFlags, replaced)
 	}
 	result.Flags = newFlags
-	newArgs := make([]string, len(result.Args))
-	for i, arg := range result.Args {
-		newArgs[i] = expandPath(replace(arg))
+	newArgs := make([]string, 0, len(result.Args))
+	for _, arg := range result.Args {
+		replaced := replace(arg)
+		if shouldOmitStandalonePlaceholderArg(arg, replaced) {
+			continue
+		}
+		newArgs = append(newArgs, expandPath(replaced))
 	}
 	result.Args = newArgs
 	result.WorkDir = expandPath(replace(result.WorkDir))
@@ -1014,6 +1045,49 @@ func (m model) editFields(script ScriptEntry) []editField {
 }
 
 const editFieldCount = 8
+
+// promptOrRun opens the param prompt if the script has placeholders, or runs
+// it directly. Used for both initial launch and rerun-from-running-tab.
+func (m *model) promptOrRun(script *ScriptEntry) tea.Cmd {
+	if script == nil {
+		return nil
+	}
+	params := extractPlaceholders(*script)
+	if len(params) > 0 {
+		m.mode = modeParamPrompt
+		m.paramScript = script
+		m.paramFields = make([]string, len(params))
+		m.paramDescs = make([]string, len(params))
+		m.paramValues = make([]string, len(params))
+		m.paramOptions = make([][]string, len(params))
+		m.paramOptionCursors = make([]int, len(params))
+		for i, p := range params {
+			m.paramFields[i] = p.Name
+			m.paramDescs[i] = p.Desc
+			m.paramOptions[i] = p.Options
+			if len(p.Options) > 0 {
+				defIdx := 0
+				for j, opt := range p.Options {
+					if opt == p.Default {
+						defIdx = j
+						break
+					}
+				}
+				m.paramOptionCursors[i] = defIdx
+				m.paramValues[i] = p.Options[defIdx]
+			} else {
+				m.paramValues[i] = p.Default
+			}
+		}
+		m.paramCursor = 0
+		m.paramFocusField(0)
+		return nil
+	}
+	if unresolved := unresolvedPlaceholders(*script); len(unresolved) > 0 {
+		return showStatus(fmt.Sprintf("Unresolved placeholders: %s", strings.Join(unresolved, ", ")))
+	}
+	return m.runScript(*script, true)
+}
 
 func (m *model) startEdit() {
 	if len(m.visibleScripts) == 0 {

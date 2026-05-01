@@ -1,5 +1,15 @@
 ## DevLog
 
+### 2026-04-30: Rerun re-prompts params
+`r` on a finished tab in the Running page used to call `runScript` directly, so users couldn't toggle dry-run or change flags between runs. Extracted a `promptOrRun` helper from the script-list `enter` handler and reused it from rerun. Resolves the live `ScriptEntry` by ID first so edits since launch are honored. Files: helpers.go, update.go.
+
+### 2026-04-30: Release helpers — optional enum omission + multi-repo sweep
+
+- **Optional enum flags**: standalone `{{...:|--flag=}}` placeholders now drop empty selections from `args`/`flags` instead of passing empty strings to the child process
+- **Legacy compatibility**: older `{{mode:--|--flag=--}}` config entries are treated as omitted when `--` is selected, which fixes release-tag style scripts without forcing immediate config edits
+- **Sweep helper**: added `scripts/release-sweep.sh` to bump semver tags across sibling repos under a suite root; each repo computes its own next version and only tags when it has commits since its last semver tag
+- **Docs/tests**: documented optional flag syntax and added regression coverage for empty/legacy enum omission
+
 ### 2026-04-30: Bug fixes — param spaces, stop script, help scroll
 
 - **`shellSplit`**: now treats `{{...}}` blocks as atomic — spaces inside placeholders no longer split args/flags into separate tokens

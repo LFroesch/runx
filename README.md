@@ -51,6 +51,7 @@ runx --config /path/to/scripts.json  # Use custom config
 - **Category grouping** — Organize scripts by category with emoji icons
 - **Search / filter** — `/` to live-filter by name, category, command, description, or tags
 - **Parameterized scripts** — `{{name}}`, `{{name=default}}`, `{{name:Desc=default}}` placeholders prompt before running
+- **Optional enum flags** — standalone enum placeholders that resolve to empty are omitted, so patterns like `{{mode:|--dry-run=}}` work for optional flags
 - **Interactive input support** — Password/input/confirm prompts handled in-app (`y/n` quick confirm)
 - **Tags & env vars** — Per-script tags and environment variables
 - **Output capture** — All output saved with timestamps to `~/.local/share/runx/`
@@ -124,6 +125,12 @@ Script editing uses `$VISUAL` → `$EDITOR` → nvim → vim → nano → vi (fi
 - `runx` handles standard prompt-driven scripts well (`read -rp`, password prompts, `[y/N]` confirms).
 - Full-screen terminal UIs (`fzf`, `vim`, `less`, `top`, etc.) need a normal terminal, not runx at this point in time.
 - If unresolved placeholders remain after prompting, `runx` will block execution and show which keys are missing.
+- For optional CLI flags in `args` or `flags`, prefer an empty enum option: `{{mode:|--dry-run=}}`. Legacy `{{mode:--|--dry-run=--}}` entries are also treated as omitted when `--` is selected.
+
+## Release Helpers
+
+- `scripts/release-sweep.sh` tags sibling repos under a suite root, bumping each repo from its own current semver. Example: `bash scripts/release-sweep.sh patch --dry-run`.
+- Run it from any repo inside `tui-suite`, or pass `--root /path/to/tui-suite` and optional repo names to limit the sweep.
 
 ### SSH
 
