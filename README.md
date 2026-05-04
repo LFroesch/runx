@@ -124,6 +124,7 @@ Script editing uses `$VISUAL` → `$EDITOR` → nvim → vim → nano → vi (fi
 
 - `runx` handles standard prompt-driven scripts well (`read -rp`, password prompts, `[y/N]` confirms).
 - Full-screen terminal UIs (`fzf`, `vim`, `less`, `top`, etc.) need a normal terminal, not runx at this point in time.
+- For `sudo`, either authenticate first with `sudo -v` or use `sudo -S` so the password is read from stdin, or refrain from use runx for sudo commands. Plain `sudo` password prompts usually bypass runx's in-app input.
 - If unresolved placeholders remain after prompting, `runx` will block execution and show which keys are missing.
 - For optional CLI flags in `args` or `flags`, prefer an empty enum option: `{{mode:|--dry-run=}}`. Legacy `{{mode:--|--dry-run=--}}` entries are also treated as omitted when `--` is selected.
 

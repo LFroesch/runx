@@ -585,7 +585,10 @@ func (m model) renderRunningPage() string {
 
 	lines := rs.Lines
 	// Truncate lines to avoid wrapping messing up layout
-	maxLineW := m.width - 2
+	maxLineW := m.width
+	if maxLineW < 1 {
+		maxLineW = 1
+	}
 	startLine := rs.Scroll
 	endLine := startLine + visibleHeight
 	if endLine > len(lines) {
@@ -601,9 +604,7 @@ func (m model) renderRunningPage() string {
 	var visibleLines []string
 	if len(lines) > 0 && startLine < endLine {
 		for _, l := range lines[startLine:endLine] {
-			// strip carriage returns so they don't corrupt line display
-			l = strings.ReplaceAll(l, "\r", "")
-			visibleLines = append(visibleLines, xansi.Truncate(l, maxLineW, ""))
+			visibleLines = append(visibleLines, sanitizeOutputLine(l, maxLineW))
 		}
 	}
 	var visibleContent string
@@ -612,6 +613,8 @@ func (m model) renderRunningPage() string {
 	}
 
 	contentStyle := lipgloss.NewStyle().
+		Width(m.width).
+		MaxWidth(m.width).
 		Height(visibleHeight).
 		MaxHeight(visibleHeight)
 
@@ -892,7 +895,6 @@ func (m model) renderHelp() string {
 			{"G/g", "Bottom / top"},
 			{"ctrl+d/u", "Page down / up"},
 			{"enter", "Run script"},
-			{"D", "Dry run preview"},
 			{"e", "Edit (field form)"},
 			{"E", "Edit (textarea)"},
 			{"n/a", "New script"},

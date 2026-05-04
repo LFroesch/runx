@@ -1,5 +1,11 @@
 ## DevLog
 
+### 2026-05-04: v1 blocker audit
+
+- Audited `WORK.md` against the live codebase and removed items that are already shipped: enum selectors, interactive `y/n` replies, scheduler support, and running-page output streaming
+- Reframed the work list around actual release blockers: manual smoke coverage, explicit privileged-command expectations, and final review of local unstaged UI/output changes
+- Removed a stale in-app help entry for the old dry-run key and documented the `sudo -v` / `sudo -S` guidance in `README.md`
+
 ### 2026-04-30: Rerun re-prompts params
 `r` on a finished tab in the Running page used to call `runScript` directly, so users couldn't toggle dry-run or change flags between runs. Extracted a `promptOrRun` helper from the script-list `enter` handler and reused it from rerun. Resolves the live `ScriptEntry` by ID first so edits since launch are honored. Files: helpers.go, update.go.
 

@@ -18,7 +18,27 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
 )
+
+// sanitizeOutputLine prepares a line of script output for display in a fixed-width
+// row. It removes control characters that would either consume zero terminal cells
+// (and break xansi's width math) or expand to many cells (tabs → 8) and cause the
+// terminal to wrap, which would push the footer off-screen on the running page.
+func sanitizeOutputLine(l string, maxWidth int) string {
+	l = strings.ReplaceAll(l, "\r", "")
+	l = strings.ReplaceAll(l, "\t", "    ")
+	var b strings.Builder
+	b.Grow(len(l))
+	for _, r := range l {
+		if r == 0x1b || r >= 0x20 || r == ' ' {
+			b.WriteRune(r)
+			continue
+		}
+		// drop other C0 controls (backspace, bell, vertical tab, form feed, etc.)
+	}
+	return xansi.Truncate(b.String(), maxWidth, "")
+}
 
 // Placeholder syntax: {{name}}, {{name=default}}, {{name:Description=default}}
 // Names may contain spaces (e.g. {{location title:opt1|opt2=default}}).
