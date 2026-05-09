@@ -1,5 +1,5 @@
 # SCRIPT IDEAS - runx
-Script idea backlog for runx automation, audits, and helper utilities.
+- Script idea backlog for runx automation, audits, and helper utilities.
 
 ## Notes
 

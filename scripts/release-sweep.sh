@@ -3,7 +3,7 @@
 # Usage:
 #   release-sweep.sh [patch|minor|major] [--dry-run] [--yes] [--allow-dirty] [--root DIR]
 #   release-sweep.sh [patch|minor|major] [--dry-run] [--yes] [--allow-dirty] [--root DIR] repo1 repo2 ...
-
+#   allow for an all tag?
 set -euo pipefail
 
 BOLD='\033[1m'

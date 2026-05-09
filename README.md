@@ -1,175 +1,91 @@
-# Runx
+# runx
 
-TUI script runner and manager. Register commands once, organize by category, run them instantly with real-time streaming output. Run multiple scripts concurrently and switch between outputs. Schedule scripts to run on intervals. Built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+Terminal script runner with saved commands, live output, schedules, and execution history. `runx` is meant for repeatable dev tasks that you want one keypress away.
 
-## Quick Install
+## Install
 
 Supported platforms: Linux and macOS. On Windows, use WSL.
 
-Recommended (installs to `~/.local/bin`):
+Recommended:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LFroesch/runx/main/install.sh | bash
 ```
 
-Or download a binary from [GitHub Releases](https://github.com/LFroesch/runx/releases).
-
-Or install with Go:
+Other options:
 
 ```bash
 go install github.com/LFroesch/runx@latest
-```
-
-Or build from source:
-
-```bash
 make install
 ```
 
-Commands:
+Run:
 
 ```bash
-runx              # Launch TUI
-runx --version    # Print version
-runx --config /path/to/scripts.json  # Use custom config
+runx
+runx --version
+runx --config /path/to/scripts.json
 ```
 
-### Quick Start
+## Pages
 
-1. Press `n` to add a script
-2. Fill in fields (tab to cycle, enter to save)
-3. Press `enter` on any script to run it — output streams in real-time
-4. Run multiple scripts, switch between outputs with `tab`
-5. Press `2` to manage schedules, `3` to browse output history
+| Page | Purpose |
+|------|---------|
+| Scripts | Saved commands, categories, filters, and launch flow |
+| Schedules | Interval-based runs and enable or disable state |
+| History | Stored output from previous runs |
+| Running | Live output for active or completed executions |
 
 ## Features
 
-- **Page navigation** — Switch between Scripts, Schedules, History, and Running with `1/2/3/4`
-- **Streaming output** — See script output in real-time as it runs
-- **Concurrent execution** — Run multiple scripts simultaneously, tab between outputs
-- **Cron scheduling** — Run scripts on intervals (5m, 1h, etc.) with in-app scheduler. `last_run` is persisted, so schedules survive quit/reopen. Minimum interval 1m; ticks every 30s, so firing time can drift up to ~30s.
-- **Category grouping** — Organize scripts by category with emoji icons
-- **Search / filter** — `/` to live-filter by name, category, command, description, or tags
-- **Parameterized scripts** — `{{name}}`, `{{name=default}}`, `{{name:Desc=default}}` placeholders prompt before running
-- **Optional enum flags** — standalone enum placeholders that resolve to empty are omitted, so patterns like `{{mode:|--dry-run=}}` work for optional flags
-- **Interactive input support** — Password/input/confirm prompts handled in-app (`y/n` quick confirm)
-- **Tags & env vars** — Per-script tags and environment variables
-- **Output capture** — All output saved with timestamps to `~/.local/share/runx/`
-- **Run tracking** — Last run time, execution count, and sort by usage
+- Register scripts once and run them quickly
+- Stream output live in the terminal
+- Run multiple scripts at the same time
+- Keep output history under `~/.local/share/runx/`
+- Schedule interval-based jobs inside the app
+- Prompt for placeholders before execution
+- Pass environment variables per script
+- Handle many text, password, and yes/no prompts in-app while a script is running
 
-## Keybindings
+Scripts are stored in `~/.config/runx/runx-scripts.json` by default.
 
-### Global
+## Placeholders
+
+`runx` supports placeholders in commands and args:
+
+- `{{name}}`
+- `{{name=default}}`
+- `{{name:Description=default}}`
+
+This is useful for things like branch names, hostnames, or deploy modes that change per run.
+
+It also supports optional flag-style placeholders, so a missing choice can cleanly omit an argument instead of leaving a stub behind.
+
+## Notes
+
+- The scheduler is in-app. Jobs only fire while `runx` is open.
+- Scheduled runs are interval based, with a minimum of one minute.
+- Full-screen terminal apps like `vim`, `fzf`, `less`, or `top` are not a good fit yet.
+- Plain `sudo` and some SSH password prompts do not behave well because those tools often read from `/dev/tty` instead of stdin.
+
+## Controls
 
 | Key | Action |
 |-----|--------|
-| `1/2/3/4` | Switch page (Scripts/Schedules/History/Running) |
-| `?` | Help overlay |
-| `q` | Quit |
-
-### Scripts Page
-
-| Key | Action |
-|-----|--------|
-| `j/k`, `↑/↓` | Navigate |
-| `G/g` | Jump to bottom/top |
-| `ctrl+d/u` | Page down/up |
-| `enter`, `space` | Run script |
+| `1/2/3/4` | Switch pages |
+| `enter`, `space` | Run selected script |
+| `n` | Add script |
 | `e` | Edit script |
-| `n/a` | Add new script |
-| `d` | Delete script |
-| `/` | Search / filter |
-| `s` | Sort (name/runs/recent) |
-| `←/→` | Scroll table columns |
-| `v` | Jump to History page |
-
-### Schedules Page
-
-| Key | Action |
-|-----|--------|
-| `enter` | Toggle schedule on/off |
-| `e` | Set schedule interval |
-
-### History Page
-
-| Key | Action |
-|-----|--------|
-| `enter` | View output |
-| `c` | Clear old output files |
-
-### Running Page
-
-| Key | Action |
-|-----|--------|
-| `j/k`, `↑/↓` | Scroll line by line |
-| `G/g` | Jump to end / top |
-| `ctrl+d/u` | Page down / up |
-| `tab` | Switch between running scripts |
-| `y/n` | Quick reply for confirm prompts |
-| `x` | Close completed tab |
-
-## Storage
-
-| Location | Purpose |
-|----------|---------|
-| `~/.config/runx/runx-scripts.json` | Script registry (includes schedules) |
-| `~/.config/runx/runx-scripts.json.bak` | Auto-backup of previous config state |
-| `~/.local/share/runx/` | Output history (timestamped files) |
-
-## Editor
-
-Script editing uses `$VISUAL` → `$EDITOR` → nvim → vim → nano → vi (first found).
-
-## Script UX Notes (v1)
-
-- `runx` handles standard prompt-driven scripts well (`read -rp`, password prompts, `[y/N]` confirms).
-- Full-screen terminal UIs (`fzf`, `vim`, `less`, `top`, etc.) need a normal terminal, not runx at this point in time.
-- For `sudo`, either authenticate first with `sudo -v` or use `sudo -S` so the password is read from stdin, or refrain from use runx for sudo commands. Plain `sudo` password prompts usually bypass runx's in-app input.
-- If unresolved placeholders remain after prompting, `runx` will block execution and show which keys are missing.
-- For optional CLI flags in `args` or `flags`, prefer an empty enum option: `{{mode:|--dry-run=}}`. Legacy `{{mode:--|--dry-run=--}}` entries are also treated as omitted when `--` is selected.
-
-## Release Helpers
-
-- `scripts/release-sweep.sh` tags sibling repos under a suite root, bumping each repo from its own current semver. Example: `bash scripts/release-sweep.sh patch --dry-run`.
-- Run it from any repo inside `tui-suite`, or pass `--root /path/to/tui-suite` and optional repo names to limit the sweep.
-
-### SSH
-
-SSH reads passwords and key passphrases from `/dev/tty`, not stdin — the in-app password input **will not work** for plain `ssh` password prompts or `ssh-add`/passphrase-protected key logins. SSH passwords are a little tricky right now. I am still working out the kinks.
-
-**Recommended:** use SSH key auth (`ssh-copy-id user@host`).
-
-**If you must use password auth**, use `sshpass`:
-```bash
-# command: sshpass
-# args: -p mypassword ssh user@host
-# or via env var (safer — not visible in process list):
-# env: SSHPASS=mypassword
-# command: sshpass
-# args: -e ssh user@host
-```
-
-Host key prompts (`Are you sure you want to continue connecting?`) are handled by runx — type `yes` or `no` in the confirm dialog. To suppress them entirely, add `-o StrictHostKeyChecking=no` to your ssh args.
-
-## Best Script Patterns
-
-- Prefer explicit args/flags over interactive selection where possible.
-- Use clear prompts ending with `?` or `:` for smooth input detection.
-- For optional flags, use defaults in placeholders, e.g. `{{dry=--dry-run}}`.
-- Keep long-running scripts line-oriented (flush output regularly) for the cleanest streaming UX.
-
-### Getting Prompts to Show the Input Overlay
-
-runx auto-detects interactive prompts from your script's output and shows an in-app input dialog. Use `printf` (no trailing newline) so the prompt text flushes immediately:
-
-| Trigger | Overlay type | Example |
-|---------|-------------|---------|
-| Line contains `password` or `passphrase` | Masked input | `printf "Enter password: "` |
-| Line matches `[y/n]`, `(yes/no)`, `(yes/no/[fingerprint])` | Confirm (`y/n → yes/no`) | `printf "Continue? [y/n] "` |
-| Line ends with `?` | Text input | `printf "What is your name? "` |
-| Line ends with `:` + keyword (`enter`, `input`, `value`, etc.) | Text input | `printf "Enter token: "` |
-
-`read` calls with `-s` (silent) are fine — runx masks the input field regardless when it detects a password prompt. Always pair with `printf` or `echo` for the prompt text, since runx reads output lines to decide what overlay to show.
+| `E` | Edit referenced script file |
+| `/` | Search |
+| `s` | Change sort or stop a running script depending on page |
+| `tab` | Switch running-output tab |
+| `r` | Rerun completed script from Running |
+| `y` | Copy output |
+| `esc` | Cancel active stdin prompt |
+| `x` | Close completed run tab |
+| `?` | Help |
+| `q` | Quit |
 
 ## License
 

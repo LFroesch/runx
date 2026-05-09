@@ -245,8 +245,8 @@ func (m model) renderScriptsPage() string {
 		fixedH++
 	}
 	contentH := m.height - fixedH
-	if contentH < 5 {
-		contentH = 5
+	if contentH < 3 {
+		contentH = 3
 	}
 
 	leftW := 28
@@ -254,11 +254,11 @@ func (m model) renderScriptsPage() string {
 		leftW = m.width / 3
 	}
 	rightW := m.width - leftW - 5 // account for borders + gap
-	if rightW < 8 {
-		rightW = 8
+	if rightW < 12 {
+		rightW = 12
 		leftW = m.width - rightW - 5
-		if leftW < 5 {
-			leftW = 5
+		if leftW < 8 {
+			leftW = 8
 		}
 	}
 
@@ -897,7 +897,7 @@ func (m model) renderHelp() string {
 			{"enter", "Run script"},
 			{"e", "Edit (field form)"},
 			{"E", "Edit (textarea)"},
-			{"n/a", "New script"},
+			{"n / a", "New script"},
 			{"d", "Delete script"},
 			{"/", "Search / filter"},
 			{"s", "Sort (name/runs/recent)"},

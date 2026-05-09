@@ -755,8 +755,11 @@ func (m model) updateScriptsPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.width < 80 {
 				rightW = m.width - (m.width / 3) - 5
 			}
-			m.scriptEditArea.SetWidth(rightW - 2)
-			m.scriptEditArea.SetHeight(m.height - 9)
+			if rightW < 14 {
+				rightW = 14
+			}
+			m.scriptEditArea.SetWidth(max(12, rightW-2))
+			m.scriptEditArea.SetHeight(max(3, m.height-9))
 			m.scriptEditArea.Focus()
 			m.mode = modeScriptEdit
 			return m, m.scriptEditArea.Cursor.BlinkCmd()
