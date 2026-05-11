@@ -1,6 +1,8 @@
 # runx
 
-Terminal script runner with saved commands, live output, schedules, and execution history. `runx` is meant for repeatable dev tasks that you want one keypress away.
+Terminal script runner with saved commands, live output, schedules, and execution history. `runx` is meant for repeatable dev tasks you want one keypress away without digging through shell history or half-finished notes.
+
+![runx hero screenshot](assets/screenshots/hero.png)
 
 ## Install
 
@@ -26,6 +28,10 @@ runx
 runx --version
 runx --config /path/to/scripts.json
 ```
+
+## Media
+
+![runx running screenshot](assets/screenshots/running.png)
 
 ## Pages
 
