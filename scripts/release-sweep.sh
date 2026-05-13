@@ -2,6 +2,7 @@
 # release-sweep.sh — bump semver tags across sibling repos, each from its own current version
 # Usage:
 #   release-sweep.sh [patch|minor|major] [--dry-run] [--yes] [--allow-dirty] [--root DIR]
+#   release-sweep.sh [patch|minor|major] [--dry-run] [--yes] [--allow-dirty] [--root DIR] [--repos a,b,c]
 #   release-sweep.sh [patch|minor|major] [--dry-run] [--yes] [--allow-dirty] [--root DIR] repo1 repo2 ...
 # Major releases promote pre-v1 repos to v1.0.0 even if there are no commits since the last tag.
 set -euo pipefail
@@ -16,7 +17,7 @@ RESET='\033[0m'
 usage() {
 	cat <<'EOF'
 Usage:
-  release-sweep.sh [patch|minor|major] [--dry-run] [--yes] [--allow-dirty] [--root DIR] [repo ...]
+  release-sweep.sh [patch|minor|major] [--dry-run] [--yes] [--allow-dirty] [--root DIR] [--repos a,b,c] [repo ...]
 
 Behavior:
   Scans top-level git repos under DIR (default: parent of the current repo),
@@ -31,6 +32,7 @@ Options:
   --yes              Skip confirmation prompt
   --allow-dirty      Allow tagging repos with local changes
   --root DIR         Suite root containing child repos
+  --repos LIST       Comma-separated repo names to target (blank = all)
   -h, --help         Show this help
 EOF
 }
@@ -98,6 +100,23 @@ repo_remote() {
 	git remote | head -1 || true
 }
 
+append_repo_list() {
+	local raw="$1"
+	local normalized token
+
+	normalized="$(printf '%s' "$raw" | tr ',' ' ')"
+	[[ -n "$(printf '%s' "$normalized" | xargs)" ]] || return 0
+
+	for token in $normalized; do
+		case "$token" in
+			all|'*')
+				return 0
+				;;
+		esac
+		REPOS+=("$token")
+	done
+}
+
 BUMP="patch"
 DRY_RUN=false
 ASSUME_YES=false
@@ -123,6 +142,14 @@ while [[ $# -gt 0 ]]; do
 			shift
 			[[ $# -gt 0 ]] || die "--root requires a value"
 			ROOT="$1"
+			;;
+		--repos)
+			shift
+			[[ $# -gt 0 ]] || die "--repos requires a value"
+			append_repo_list "$1"
+			;;
+		--repos=*)
+			append_repo_list "${1#--repos=}"
 			;;
 		-h|--help)
 			usage
@@ -179,7 +206,10 @@ for repo_dir in "${SUITE_REPOS[@]}"; do
 	TARGET_REPOS+=("$repo_dir")
 done
 
-[[ ${#TARGET_REPOS[@]} -gt 0 ]] || die "No matching repos selected"
+if [[ ${#TARGET_REPOS[@]} -eq 0 ]]; then
+	available="$(printf '%s\n' "${SUITE_REPOS[@]##*/}" | paste -sd ', ' -)"
+	die "No matching repos selected. Available repos: $available"
+fi
 
 PLANNED=()
 SKIPPED=()
