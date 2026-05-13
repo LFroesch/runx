@@ -8,19 +8,14 @@ Terminal script runner with saved commands, live output, schedules, and executio
 
 ## Install
 
-Supported platforms: Linux, macOS, and Windows.
+Supported platforms: Linux and macOS.
+
+Windows release binaries and installer entrypoints are shipped, but native Windows support is unverified.
 
 Recommended:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LFroesch/runx/main/install.sh | bash
-```
-
-Other options:
-
-```bash
-go install github.com/LFroesch/runx@latest
-make install
 ```
 
 Windows:
@@ -31,6 +26,13 @@ Windows:
 
 ```bat
 install.cmd
+```
+
+Other options:
+
+```bash
+go install github.com/LFroesch/runx@latest
+make install
 ```
 
 Run:
