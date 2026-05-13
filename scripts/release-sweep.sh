@@ -3,7 +3,7 @@
 # Usage:
 #   release-sweep.sh [patch|minor|major] [--dry-run] [--yes] [--allow-dirty] [--root DIR]
 #   release-sweep.sh [patch|minor|major] [--dry-run] [--yes] [--allow-dirty] [--root DIR] repo1 repo2 ...
-#   allow for an all tag?
+# Major releases promote pre-v1 repos to v1.0.0 even if there are no commits since the last tag.
 set -euo pipefail
 
 BOLD='\033[1m'
@@ -22,6 +22,8 @@ Behavior:
   Scans top-level git repos under DIR (default: parent of the current repo),
   computes the next semver tag in each repo independently, shows a summary,
   and tags/pushes repos that have commits since their last semver tag.
+  For a major bump, repos below v1.0.0 are also eligible for promotion to
+  v1.0.0 even with no new commits.
 
 Options:
   patch|minor|major  Semver bump type to apply in each repo (default: patch)
@@ -68,6 +70,16 @@ bump_tag() {
 	esac
 
 	printf 'v%s.%s.%s\n' "$major" "$minor" "$patch"
+}
+
+is_pre_v1() {
+	local current="$1"
+	local ver major
+
+	ver="${current#v}"
+	major="${ver%%.*}"
+	[[ "$major" =~ ^[0-9]+$ ]] || return 1
+	(( major < 1 ))
 }
 
 repo_remote() {
@@ -201,12 +213,19 @@ for repo_dir in "${TARGET_REPOS[@]}"; do
 		log="$(git log "${current}..HEAD" --oneline --no-decorate)"
 	fi
 
-	if [[ -z "$log" ]]; then
-		SKIPPED+=("$repo_name|no commits since $current")
-		continue
+	new_tag="$(bump_tag "$current" "$BUMP")"
+	allow_v1_promotion=false
+	if [[ "$BUMP" == "major" ]] && is_pre_v1 "$current" && [[ "$new_tag" == "v1.0.0" ]]; then
+		allow_v1_promotion=true
 	fi
 
-	new_tag="$(bump_tag "$current" "$BUMP")"
+	if [[ -z "$log" ]]; then
+		if ! $allow_v1_promotion; then
+			SKIPPED+=("$repo_name|no commits since $current")
+			continue
+		fi
+	fi
+
 	if git rev-parse -q --verify "refs/tags/$new_tag" >/dev/null 2>&1; then
 		SKIPPED+=("$repo_name|tag already exists: $new_tag")
 		continue
@@ -216,6 +235,9 @@ for repo_dir in "${TARGET_REPOS[@]}"; do
 	remote="$(repo_remote "$branch")"
 	head_sha="$(git rev-parse --short HEAD)"
 	first_commit="$(printf '%s\n' "$log" | head -1)"
+	if [[ -z "$first_commit" ]]; then
+		first_commit="(no new commits; v1 promotion)"
+	fi
 	PLANNED+=("$repo_dir|$repo_name|$branch|$current|$new_tag|$commit_count|$remote|$head_sha|$first_commit")
 
 	echo -e "${BOLD}${repo_name}${RESET}"

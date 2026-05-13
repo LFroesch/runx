@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LFroesch/tui-suite/suitechrome"
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 )
@@ -78,7 +79,7 @@ func (m model) View() string {
 // --- Header ---
 
 func (m model) renderHeader() string {
-	title := titleStyle.Render("Runx") + " " + dimTextStyle.Render(version)
+	title := suitechrome.RenderTitle("runx", version)
 
 	pages := []struct {
 		name string
@@ -90,19 +91,12 @@ func (m model) renderHeader() string {
 		{"Running", pageRunning},
 	}
 
-	var tabs []string
+	var tabs []suitechrome.Tab
 	for i, pg := range pages {
-		if i > 0 {
-			tabs = append(tabs, dimTextStyle.Render(" │ "))
-		}
-		if pg.p == m.page {
-			tabs = append(tabs, activePageStyle.Render(pg.name))
-		} else {
-			tabs = append(tabs, inactivePageStyle.Render(pg.name))
-		}
+		tabs = append(tabs, suitechrome.Tab{Label: fmt.Sprintf("%d %s", i+1, pg.name), Active: pg.p == m.page})
 	}
 
-	left := title + "  " + strings.Join(tabs, "")
+	left := title + "  " + suitechrome.RenderTabs(tabs)
 
 	// Right side stats
 	var statParts []string
@@ -152,7 +146,7 @@ func (m model) renderHeader() string {
 		}
 	}
 
-	headerLine := left + strings.Repeat(" ", gap) + right
+	headerLine := suitechrome.JoinHeader(m.width, left, right)
 
 	if m.mode == modeSearch {
 		searchBar := "  " + keyStyle.Render("/") + " " + m.searchInput.View()
@@ -165,12 +159,9 @@ func (m model) renderHeader() string {
 // --- Footer ---
 
 func (m model) renderFooter() string {
-	var parts []string
+	var actions []suitechrome.Action
 	add := func(key, action string) {
-		if len(parts) > 0 {
-			parts = append(parts, bulletStyle.Render(" · "))
-		}
-		parts = append(parts, keyStyle.Render(key), " ", actionStyle.Render(action))
+		actions = append(actions, suitechrome.Action{Key: key, Label: action})
 	}
 
 	switch m.page {
@@ -225,7 +216,7 @@ func (m model) renderFooter() string {
 		add("q", "scripts")
 	}
 
-	return " " + strings.Join(parts, "")
+	return " " + suitechrome.RenderActions(actions)
 }
 
 // --- Scripts page: split panel ---
